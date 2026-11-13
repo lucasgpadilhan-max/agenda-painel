@@ -172,7 +172,7 @@ const PROVEDORES = {
   gemini: { nome: "Google Gemini", modelos: ["gemini-3.5-flash-lite", "gemini-3.5-flash"], site: "https://aistudio.google.com/apikey" },
   openai: { nome: "OpenAI", modelos: ["gpt-5-mini", "gpt-5"], site: "https://platform.openai.com/api-keys" },
 };
-const ABAS_NEG = [["visao", "Visão geral"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
+const ABAS_NEG = [["visao", "Visão geral"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
   ["avisos", "Avisos"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
 
 let negocios = [], verticais = [], plataforma = null, atual = null, abaNeg = "visao", timerQA = null, filtroErros = "aberto";
@@ -202,6 +202,11 @@ function traduzErro(m) {
   if (/duplicate key.*wa_phone_number_id/.test(m)) return "Esse Phone number ID já está em outro cliente.";
   if (/NOME_OBRIGATORIO/.test(m)) return "Informe o nome.";
   if (/DURACAO_INVALIDA/.test(m)) return "Informe a duração em minutos.";
+  if (/EXCLUIR_SO_DESATIVADO/.test(m)) return "Desative o cliente antes de excluir.";
+  if (/CONFIRMACAO_NAO_CONFERE/.test(m)) return "O nome digitado não confere.";
+  if (/EXCLUIR_QA_PROIBIDO/.test(m)) return "O negócio de teste não pode ser excluído.";
+  if (/PLANO_INCOMPLETO/.test(m)) return "Preencha valor e dia do vencimento.";
+  if (/DIA_INVALIDO/.test(m)) return "Dia do vencimento entre 1 e 28.";
   if (/HORARIO_INVALIDO/.test(m)) return "Horário inválido: o fim precisa ser depois do início (formato 08:00-12:00).";
   return m;
 }
@@ -258,7 +263,8 @@ async function carregarClientes() {
       <div class="linha peq" style="margin-top:4px">
         <span class="chip ${cor[n.status] || ""}">${esc(n.status)}</span>
         ${n.qa ? '<span class="chip">teste</span>' : n.envio === "whatsapp" ? '<span class="chip ok">no ar</span>' : '<span class="chip warn">simulação</span>'}
-        ${n.bot_ativo ? "" : '<span class="chip bad">bot off</span>'}
+        ${n.desativado_em ? '<span class="chip bad">desativado</span>' : n.bot_ativo ? "" : '<span class="chip bad">bot off</span>'}
+        ${chipPagamento(n.pagamento)}
       </div>
       <div class="barra" title="Configuração: ${n.checklist_ok}/${n.checklist_total}"><i style="width:${pct}%"></i></div>
       <div class="muted peq" style="margin-top:3px">Configuração ${n.checklist_ok}/${n.checklist_total} · ${n.msgs_24h} msgs 24h</div>
@@ -308,9 +314,11 @@ async function abrirNegocio(id, aba = abaNeg) {
         ${resumo.erros_abertos ? `<span class="chip bad">${resumo.erros_abertos} erro(s) aberto(s)</span>` : ""}</div>
     </div>
     ${n.qa ? '<div class="aviso" style="margin-top:10px">Este é o negócio usado pelos testes automáticos. Evite mudar a configuração dele.</div>' : ""}
+    ${resumo.desativado_em ? `<div class="erro-msg" style="margin-top:10px">⛔ Cliente <b>desativado</b> desde ${data(resumo.desativado_em)}: o bot não responde nem avisa a equipe. Reative na aba Assinatura.</div>` : ""}
+    ${resumo.pagamento?.situacao === "atrasado" && !resumo.desativado_em ? `<div class="aviso" style="margin-top:10px">Mensalidade atrasada há ${resumo.pagamento.dias_atraso} dia(s) (venceu ${dataCurta(resumo.pagamento.vencimento)}).</div>` : ""}
     <div class="subabas">${ABAS_NEG.map(([k, r]) => {
       const p = atual.checklist.filter((c) => c.aba === k && !c.ok).length;
-      const extra = k === "erros" && resumo.erros_abertos ? `<span class="cont">${resumo.erros_abertos}</span>` : p ? `<span class="cont" style="background:var(--warn)">${p}</span>` : "";
+      const extra = k === "assinatura" && resumo.pagamento?.situacao === "atrasado" ? '<span class="cont">!</span>' : k === "erros" && resumo.erros_abertos ? `<span class="cont">${resumo.erros_abertos}</span>` : p ? `<span class="cont" style="background:var(--warn)">${p}</span>` : "";
       return `<button data-sub="${k}" class="${k === abaNeg ? "ativo" : ""}">${r}${extra}</button>`;
     }).join("")}</div>
     <div id="conteudo-neg"></div>`;
@@ -321,7 +329,7 @@ async function recarregar() { await carregarClientes(); await abrirNegocio(atual
 
 function desenharAba() {
   const alvo = $("#conteudo-neg");
-  const fn = { visao: abaVisao, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
+  const fn = { visao: abaVisao, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
   alvo.innerHTML = ""; fn(alvo);
 }
 
@@ -358,6 +366,14 @@ async function salvarSegredo(tipo, valor) {
     await recarregar();
   } catch (e) { toast(e.message); }
 }
+const brl = (v) => v == null ? "—" : "R$ " + Number(v).toFixed(2).replace(".", ",");
+const dataCurta = (d) => d ? d.split("-").reverse().join("/") : "—";
+function chipPagamento(p) {
+  if (!p || p.situacao === "sem_plano") return "";
+  if (p.situacao === "atrasado") return `<span class="chip bad">atrasado ${p.dias_atraso}d</span>`;
+  if (p.situacao === "pendente") return `<span class="chip warn">vence ${dataCurta(p.vencimento).slice(0, 5)}</span>`;
+  return '<span class="chip ok">pago</span>';
+}
 const opt = (v, atualV, rot) => `<option value="${esc(v)}" ${String(v) === String(atualV) ? "selected" : ""}>${esc(rot ?? v)}</option>`;
 
 // --- Visão geral -------------------------------------------------------
@@ -384,6 +400,108 @@ function abaVisao(alvo) {
       <span class="chip info">IA: ${esc(PROVEDORES[c.llm?.provedor ?? "plataforma"]?.nome ?? c.llm?.provedor)}</span>
     </div>`;
   $$("[data-ir]", alvo).forEach((b) => b.onclick = () => $(`[data-sub="${b.dataset.ir}"]`).click());
+}
+
+
+// --- Assinatura -------------------------------------------------------
+async function abaAssinatura(alvo) {
+  alvo.innerHTML = '<p class="muted">Carregando…</p>';
+  let a;
+  try { a = await rpc("admin_assinatura", { p_business_id: atual.negocio.id }); } catch (e) { return erroEm(alvo, e); }
+  const n = atual.negocio, p = a.pagamento ?? {};
+  const desativado = !!a.desativado_em;
+  const sit = { sem_plano: ["", "Sem cobrança definida"], em_dia: ["ok", "Em dia"], pendente: ["warn", "Pendente"], atrasado: ["bad", "Atrasado"] }[p.situacao] ?? ["", p.situacao];
+  const corSt = { pago: "ok", pendente: "warn", isento: "info", cancelado: "" };
+  alvo.innerHTML = `
+    <div class="numeros">
+      <div><b><span class="chip ${sit[0]}" style="font-size:14px">${sit[1]}${p.situacao === "atrasado" ? " · " + p.dias_atraso + " dia(s)" : ""}</span></b><span class="muted peq">situação</span></div>
+      <div><b>${brl(a.valor)}</b><span class="muted peq">mensalidade</span></div>
+      <div><b>${p.vencimento ? dataCurta(p.vencimento) : a.dia ? "dia " + a.dia : "—"}</b><span class="muted peq">${p.vencimento ? "próximo/aberto" : "vencimento"}</span></div>
+      <div><b>${p.ultimo_pagamento ? dataCurta(p.ultimo_pagamento) : "—"}</b><span class="muted peq">último pagamento</span></div>
+    </div>
+
+    <h4>Plano</h4>
+    <div class="linha" style="align-items:end">
+      <div style="width:160px"><label>Valor mensal (R$)</label><input id="pl-valor" type="number" min="0" step="0.01" value="${a.valor ?? ""}" placeholder="ex.: 197"></div>
+      <div style="width:160px"><label>Dia do vencimento</label><input id="pl-dia" type="number" min="1" max="28" value="${a.dia ?? ""}" placeholder="1 a 28"></div>
+      <button class="btn prim" id="pl-salvar">Salvar plano</button>
+      ${a.valor != null ? '<button class="btn" id="pl-remover">Sem cobrança</button>' : ""}
+    </div>
+    <p class="muted peq">A mensalidade de cada mês é criada sozinha (e a do mês seguinte, 7 dias antes de virar). Por enquanto você marca o pagamento aqui; com o Asaas, o Pix vai marcar sozinho.</p>
+
+    <h4>Mensalidades</h4>
+    ${a.mensalidades.length ? `<table><thead><tr><th>Mês</th><th>Vencimento</th><th>Valor</th><th>Situação</th><th>Pago em</th><th></th></tr></thead><tbody>
+      ${a.mensalidades.map((m) => `<tr>
+        <td>${m.competencia.slice(5, 7)}/${m.competencia.slice(0, 4)}</td><td>${dataCurta(m.vencimento)}</td><td>${brl(m.valor)}</td>
+        <td><span class="chip ${m.atrasada ? "bad" : corSt[m.status]}">${m.atrasada ? "atrasada" : esc(m.status)}</span>${m.nota ? `<div class="muted peq">${esc(m.nota)}</div>` : ""}</td>
+        <td>${m.pago_em ? dataCurta(m.pago_em) + (m.forma ? " · " + esc(m.forma) : "") : "—"}</td>
+        <td class="linha" style="flex-wrap:nowrap">${m.status !== "pago"
+          ? `<input type="date" id="mp-data-${m.id}" value="${new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" })}" style="width:140px">
+             <select id="mp-forma-${m.id}" style="width:110px">${["pix", "boleto", "cartão", "transferência", "dinheiro"].map((f) => opt(f, "pix")).join("")}</select>
+             <button class="btn mini prim" data-pagar="${m.id}">Pago</button>
+             <button class="btn mini" data-mst="${m.id}" data-st="isento" title="Não cobrar este mês">Isentar</button>`
+          : `<button class="btn mini" data-mst="${m.id}" data-st="pendente">Desfazer</button>`}</td></tr>`).join("")}
+    </tbody></table>` : '<p class="muted peq">Nenhuma mensalidade ainda. Defina o plano acima.</p>'}
+
+    <h4>Ferramenta do cliente</h4>
+    ${desativado ? `
+      <div class="erro-msg">⛔ Desativado em ${data(a.desativado_em)} · motivo: ${esc(a.desativado_motivo)}.<br>
+        O bot não responde, não agenda e não avisa a equipe. As mensagens que chegarem ficam guardadas.</div>
+      <div class="linha" style="margin-top:10px"><button class="btn prim" id="ds-reativar">Reativar cliente</button>
+        <span class="muted peq">Volta para "${esc(a.status_anterior && !["suspenso", "cancelado", "inadimplente"].includes(a.status_anterior) ? a.status_anterior : "ativo")}" com o bot ligado.</span></div>`
+    : `
+      <p class="muted peq">Desativar desliga tudo deste cliente de uma vez: o bot para de responder e de avisar a equipe. Use quando a mensalidade não for paga. Dá para reativar a qualquer momento.</p>
+      <div class="linha"><select id="ds-motivo" style="max-width:280px">
+        <option>Mensalidade não paga</option><option>Pedido do cliente</option><option>Problema técnico</option><option>Outro</option></select>
+        <button class="btn perigo" id="ds-desativar">Desativar cliente</button></div>`}
+
+    ${n.qa ? "" : `<details style="margin-top:22px"><summary class="peq" style="color:var(--bad)"><b>Excluir cliente definitivamente</b></summary>
+      <div class="card" style="margin-top:8px;border-color:#f1c4bd">
+        <p class="peq">Apaga o cliente e <b>tudo dele</b>: pacientes, conversas, reservas, mensalidades, erros e os tokens guardados no cofre. <b>Não dá para desfazer.</b></p>
+        ${desativado ? `<label>Para confirmar, digite o nome exatamente: <span class="mono">${esc(n.nome)}</span></label>
+          <div class="linha" style="flex-wrap:nowrap"><input id="ex-nome" autocomplete="off"><button class="btn perigo" id="ex-excluir" disabled>Excluir para sempre</button></div>`
+        : '<p class="aviso peq">Por segurança, desative o cliente antes de excluir.</p>'}
+      </div></details>`}`;
+
+  const salvarPlano = async (valor, dia) => {
+    try { await rpc("admin_salvar_plano", { p_business_id: n.id, p_valor: valor, p_dia: dia }); toast("Plano salvo"); await recarregar(); }
+    catch (e) { toast(e.message); }
+  };
+  $("#pl-salvar", alvo).onclick = () => {
+    const v = $("#pl-valor").value.trim(), d = $("#pl-dia").value.trim();
+    if (!v || !d) return toast("Preencha valor e dia do vencimento.");
+    salvarPlano(Number(v), Number(d));
+  };
+  const rem = $("#pl-remover", alvo); if (rem) rem.onclick = () => salvarPlano(null, null);
+  $$("[data-pagar]", alvo).forEach((b) => b.onclick = async () => {
+    const id = b.dataset.pagar;
+    try { await rpc("admin_marcar_mensalidade", { p_id: Number(id), p_status: "pago", p_pago_em: $("#mp-data-" + id).value || null, p_forma: $("#mp-forma-" + id).value, p_nota: null });
+      toast("Pagamento registrado"); await recarregar(); } catch (e) { toast(e.message); }
+  });
+  $$("[data-mst]", alvo).forEach((b) => b.onclick = async () => {
+    try { await rpc("admin_marcar_mensalidade", { p_id: Number(b.dataset.mst), p_status: b.dataset.st, p_pago_em: null, p_forma: null, p_nota: null });
+      toast("Atualizado"); await recarregar(); } catch (e) { toast(e.message); }
+  });
+  const des = $("#ds-desativar", alvo);
+  if (des) des.onclick = async () => {
+    if (des.dataset.conf !== "1") { des.dataset.conf = "1"; des.textContent = "Confirmar: desativar agora"; return; }
+    try { await rpc("admin_desativar_negocio", { p_business_id: n.id, p_motivo: $("#ds-motivo").value }); toast("Cliente desativado"); await recarregar(); }
+    catch (e) { toast(e.message); }
+  };
+  const rea = $("#ds-reativar", alvo);
+  if (rea) rea.onclick = async () => {
+    try { await rpc("admin_reativar_negocio", { p_business_id: n.id }); toast("Cliente reativado"); await recarregar(); } catch (e) { toast(e.message); }
+  };
+  const exn = $("#ex-nome", alvo), exb = $("#ex-excluir", alvo);
+  if (exn) exn.oninput = () => { exb.disabled = exn.value.trim() !== n.nome; };
+  if (exb) exb.onclick = async () => {
+    try {
+      const r = await rpc("admin_excluir_negocio", { p_business_id: n.id, p_confirmacao: exn.value.trim() });
+      toast(`Excluído: ${r.nome} (${r.mensagens} mensagens, ${r.reservas} reservas)`);
+      atual = null; $("#detalhe").innerHTML = '<p class="muted">Cliente excluído. Escolha outro à esquerda.</p>';
+      await carregarClientes(); contarErros();
+    } catch (e) { toast(e.message); }
+  };
 }
 
 // --- Negócio ----------------------------------------------------------
@@ -805,6 +923,8 @@ async function carregarQA() {
 const ACOES = { criar_negocio: "Criou cliente", atualizar_negocio: "Alterou cliente", definir_segredo: "Salvou segredo", apagar_segredo: "Apagou segredo",
   incidente_resolvido: "Marcou erro como resolvido", incidente_ignorado: "Ignorou erro", incidente_aberto: "Reabriu erro",
   salvar_profissional: "Salvou profissional", salvar_servico: "Salvou serviço", salvar_horarios: "Salvou horários",
+  salvar_plano: "Alterou plano", mensalidade_pago: "Registrou pagamento", mensalidade_pendente: "Desfez pagamento",
+  mensalidade_isento: "Isentou mensalidade", desativar_negocio: "Desativou cliente", reativar_negocio: "Reativou cliente", excluir_negocio: "Excluiu cliente",
   testar_whatsapp: "Testou WhatsApp", inscrever_webhook: "Inscreveu webhook", testar_ia: "Testou IA" };
 async function carregarAuditoria() {
   try {
