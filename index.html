@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel da Plataforma · Assistente de Agenda</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1d2433; --muted: #6b7385; --line: #e3e6ec;
+    --brand: #1f6f5c; --brand-ink: #ffffff; --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b; --info: #2b6cb0;
+    --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 4px; margin-left: 12px; }
+  nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: var(--muted); font-weight: 600; }
+  nav button.ativo { background: #e8f2ef; color: var(--brand); }
+  nav .cont { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; }
+  .direita { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }
+  main { max-width: 1180px; margin: 20px auto; padding: 0 20px 60px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .linha { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .entre { justify-content: space-between; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+  h3 { font-size: 15px; margin: 0; }
+  .muted { color: var(--muted); }
+  .peq { font-size: 12px; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #eef0f4; color: var(--muted); }
+  .chip.ok { background: #e3f4ea; color: var(--ok); } .chip.bad { background: #fbe9e7; color: var(--bad); }
+  .chip.warn { background: #fdf3e1; color: var(--warn); } .chip.info { background: #e6effa; color: var(--info); }
+  button.btn { border: 1px solid var(--line); background: #fff; padding: 7px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--ink); }
+  button.btn:hover { border-color: #c9ced8; }
+  button.prim { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+  button.perigo { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+  input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; }
+  textarea { min-height: 70px; resize: vertical; }
+  .duas { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .tres { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 14px; }
+  .sep { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+  .segredo { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; }
+  .numeros { display: flex; gap: 16px; margin-top: 10px; }
+  .numeros div b { display: block; font-size: 18px; }
+  .lista-pend { margin: 8px 0 0; padding-left: 18px; color: var(--warn); font-size: 12px; }
+  pre { background: #f7f8fa; border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; font: 12px/1.4 var(--mono); max-height: 320px; margin: 8px 0 0; }
+  .conversa { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .bolha { max-width: 80%; padding: 7px 10px; border-radius: 10px; white-space: pre-wrap; }
+  .bolha.cliente { align-self: flex-end; background: #dff3ea; }
+  .bolha.bot { align-self: flex-start; background: #f0f1f4; }
+  .bolha.sistema { align-self: center; background: none; color: var(--muted); font-size: 12px; font-style: italic; }
+  .check { font-size: 13px; padding: 2px 0; }
+  .check .det { color: var(--muted); font-size: 12px; margin-left: 20px; display: block; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); }
+  .aviso { padding: 10px 12px; border-radius: 8px; background: #fdf3e1; color: #7a5212; font-size: 13px; }
+  .erro-msg { padding: 10px 12px; border-radius: 8px; background: #fbe9e7; color: var(--bad); font-size: 13px; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; display: none; z-index: 20; }
+  #login { max-width: 380px; margin: 12vh auto; }
+  .oculto { display: none !important; }
+  details > summary { cursor: pointer; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  @media (max-width: 760px) { .duas, .tres { grid-template-columns: 1fr; } nav { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+
+<div id="login" class="card oculto">
+  <h2>Painel da plataforma</h2>
+  <p class="muted peq">Entre com o usuário administrador do Supabase.</p>
+  <form id="form-login">
+    <label for="email">E-mail</label><input id="email" type="email" autocomplete="username" required>
+    <label for="senha">Senha</label><input id="senha" type="password" autocomplete="current-password" required>
+    <div style="margin-top:14px" class="linha"><button class="btn prim" type="submit">Entrar</button></div>
+    <div id="login-erro" class="erro-msg oculto" style="margin-top:12px"></div>
+  </form>
+</div>
+
+<div id="app" class="oculto">
+  <header>
+    <div><h1>Assistente de Agenda</h1><div class="sub">Painel da plataforma</div></div>
+    <nav>
+      <button data-aba="clientes" class="ativo">Clientes</button>
+      <button data-aba="erros">Erros <span id="cont-erros" class="cont oculto"></span></button>
+      <button data-aba="testes">Testes</button>
+      <button data-aba="auditoria">Auditoria</button>
+    </nav>
+    <div class="direita"><span id="quem"></span><button class="btn" id="sair">Sair</button></div>
+  </header>
+  <main>
+    <!-- CLIENTES -->
+    <section id="aba-clientes">
+      <div class="linha entre" style="margin-bottom:12px">
+        <h2 style="margin:0">Clientes</h2>
+        <div class="linha"><button class="btn" id="recarregar">Atualizar</button><button class="btn prim" id="novo">+ Novo cliente</button></div>
+      </div>
+      <div id="lista-clientes" class="grid"></div>
+      <div id="editor" class="card oculto" style="margin-top:16px"></div>
+    </section>
+
+    <!-- ERROS -->
+    <section id="aba-erros" class="oculto">
+      <div class="linha entre" style="margin-bottom:12px">
+        <h2 style="margin:0">Erros por cliente</h2>
+        <div class="linha">
+          <select id="filtro-erros" style="width:auto">
+            <option value="aberto">Abertos</option><option value="resolvido">Resolvidos</option>
+            <option value="ignorado">Ignorados</option><option value="todos">Todos</option>
+          </select>
+          <button class="btn" id="atualizar-erros">Atualizar</button>
+        </div>
+      </div>
+      <p class="muted peq">Erros iguais são agrupados (números e ids são ignorados na comparação). Um erro resolvido volta a abrir se acontecer de novo.</p>
+      <div id="lista-erros"></div>
+    </section>
+
+    <!-- TESTES -->
+    <section id="aba-testes" class="oculto">
+      <div class="linha entre" style="margin-bottom:12px">
+        <h2 style="margin:0">Teste automático de conversas</h2>
+        <div class="linha"><button class="btn" id="retomar-qa" title="Use se o lote parou no meio">Retomar</button><button class="btn prim" id="rodar-qa">Rodar todos os testes</button></div>
+      </div>
+      <p class="muted peq">Roda no "Negócio de Teste (QA)", isolado e em modo simulação: nenhuma mensagem real é enviada. Usa a IA configurada de verdade, então cada lote consome alguns tokens.</p>
+      <div id="resumo-qa" class="card" style="margin-bottom:12px">Nenhum lote ainda.</div>
+      <div id="lista-qa"></div>
+    </section>
+
+    <!-- AUDITORIA -->
+    <section id="aba-auditoria" class="oculto">
+      <h2>Alterações feitas pelo painel</h2>
+      <div class="card"><table><thead><tr><th>Quando</th><th>Ação</th><th>Cliente</th><th>Detalhe</th></tr></thead><tbody id="lista-auditoria"></tbody></table></div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script>
+// ---------------------------------------------------------------------
+// Configuração do projeto (a chave publicável é pública por natureza;
+// quem protege os dados é o login + as regras do banco).
+// ---------------------------------------------------------------------
+const SUPABASE_URL = "https://vesskijhvnuuntlwdlze.supabase.co";
+const SUPABASE_KEY = "sb_publishable_7q24B_RNACbGcMmfYDDwWQ_DfrXVjGT";
+const URL_QA = SUPABASE_URL + "/functions/v1/whatsapp-webhook/qa";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const data = (s) => s ? new Date(s).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+let negocios = [], verticais = [], timerQA = null;
+
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 3500); }
+async function rpc(fn, args = {}) {
+  const { data: d, error } = await sb.rpc(fn, args);
+  if (error) throw new Error(traduzErro(error.message));
+  return d;
+}
+function traduzErro(m) {
+  if (/ACESSO_NEGADO/.test(m)) return "Seu usuário não é administrador da plataforma.";
+  if (/PHONE_NUMBER_ID_INVALIDO/.test(m)) return "Phone number ID inválido: use só os números que a Meta mostra.";
+  if (/duplicate key.*wa_phone_number_id/.test(m)) return "Esse Phone number ID já está em outro cliente.";
+  if (/NOME_OBRIGATORIO/.test(m)) return "Informe o nome do cliente.";
+  return m;
+}
+
+// ---------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------
+async function iniciar() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { $("#login").classList.remove("oculto"); $("#app").classList.add("oculto"); return; }
+  const admin = await rpc("is_platform_admin").catch(() => false);
+  if (!admin) {
+    $("#login").classList.remove("oculto");
+    const e = $("#login-erro"); e.textContent = "Este usuário não está cadastrado como administrador. Rode no SQL Editor: select public.adicionar_admin('" + session.user.email + "');"; e.classList.remove("oculto");
+    await sb.auth.signOut(); return;
+  }
+  $("#login").classList.add("oculto"); $("#app").classList.remove("oculto");
+  $("#quem").textContent = session.user.email;
+  verticais = await rpc("admin_listar_verticais");
+  await carregarClientes();
+  contarErros();
+}
+$("#form-login").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const e = $("#login-erro"); e.classList.add("oculto");
+  const { error } = await sb.auth.signInWithPassword({ email: $("#email").value.trim(), password: $("#senha").value });
+  if (error) { e.textContent = "Não foi possível entrar: " + error.message; e.classList.remove("oculto"); return; }
+  $("#senha").value = ""; iniciar();
+});
+$("#sair").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("ativo", x === b));
+  for (const a of ["clientes", "erros", "testes", "auditoria"]) $("#aba-" + a).classList.toggle("oculto", a !== b.dataset.aba);
+  if (b.dataset.aba === "erros") carregarErros();
+  if (b.dataset.aba === "testes") carregarQA();
+  if (b.dataset.aba === "auditoria") carregarAuditoria();
+});
+
+// ---------------------------------------------------------------------
+// Clientes
+// ---------------------------------------------------------------------
+async function carregarClientes() {
+  try { negocios = await rpc("admin_listar_negocios"); } catch (e) { $("#lista-clientes").innerHTML = `<div class="erro-msg">${esc(e.message)}</div>`; return; }
+  $("#lista-clientes").innerHTML = negocios.map((n) => {
+    const envio = n.config?.envio === "whatsapp" ? `<span class="chip ok">WhatsApp real</span>` : `<span class="chip warn">Simulação</span>`;
+    const status = { piloto: "info", ativo: "ok", inadimplente: "bad", suspenso: "bad", cancelado: "bad" }[n.status] || "";
+    return `<div class="card">
+      <div class="linha entre"><h3>${esc(n.nome)}</h3>${n.qa ? '<span class="chip">teste</span>' : ""}</div>
+      <div class="linha" style="margin-top:6px"><span class="chip ${status}">${esc(n.status)}</span>${envio}
+        ${n.bot_ativo ? '<span class="chip ok">bot ligado</span>' : '<span class="chip bad">bot desligado</span>'}
+        ${n.incidentes_abertos ? `<span class="chip bad">${n.incidentes_abertos} erro(s)</span>` : ""}</div>
+      <div class="numeros"><div><b>${n.msgs_24h}</b><span class="muted peq">mensagens 24h</span></div><div><b>${n.reservas_futuras}</b><span class="muted peq">reservas futuras</span></div></div>
+      ${n.pendencias?.length ? `<ul class="lista-pend">${n.pendencias.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : '<p class="peq" style="color:var(--ok);margin:8px 0 0">Configuração completa</p>'}
+      <div class="linha" style="margin-top:12px"><button class="btn" data-editar="${n.id}">Configurar</button></div>
+    </div>`;
+  }).join("") || '<p class="muted">Nenhum cliente.</p>';
+  document.querySelectorAll("[data-editar]").forEach((b) => b.onclick = () => abrirEditor(negocios.find((n) => n.id === b.dataset.editar)));
+}
+$("#recarregar").onclick = carregarClientes;
+$("#novo").onclick = () => abrirEditor(null);
+
+function abrirEditor(n) {
+  const c = n?.config ?? {};
+  const novo = !n;
+  const opt = (v, atual, rot) => `<option value="${esc(v)}" ${v === atual ? "selected" : ""}>${esc(rot ?? v)}</option>`;
+  const seg = (tipo, rotulo, ajuda) => {
+    const conf = n?.segredos_configurados?.[tipo];
+    const info = n?.segredos?.[tipo];
+    return `<div style="margin-top:10px"><label>${rotulo}</label>
+      <div class="segredo"><input type="password" id="seg-${tipo}" placeholder="${conf ? "configurado (termina em " + esc(info?.final ?? "????") + ") — cole um novo para trocar" : "não configurado"}" autocomplete="off">
+      <button class="btn" data-seg="${tipo}">Salvar</button>${conf ? `<button class="btn perigo" data-apagar="${tipo}">Apagar</button>` : "<span></span>"}</div>
+      <div class="muted peq">${ajuda}${info ? " · alterado em " + data(info.alterado_em) : ""}</div></div>`;
+  };
+  const ed = $("#editor");
+  ed.innerHTML = `
+    <div class="linha entre"><h2 style="margin:0">${novo ? "Novo cliente" : "Configurar: " + esc(n.nome)}</h2><button class="btn" id="fechar">Fechar</button></div>
+    ${n?.qa ? '<div class="aviso" style="margin-top:10px">Este é o negócio de teste usado pelos testes automáticos. Evite mudar a configuração dele.</div>' : ""}
+    <div class="duas">
+      <div><label>Nome do negócio</label><input id="f-nome" value="${esc(n?.nome ?? "")}"></div>
+      <div><label>Segmento</label><select id="f-vertical">${verticais.map((v) => opt(v.id, n?.vertical_id ?? "fisioterapia", v.nome)).join("")}</select></div>
+      <div><label>Situação da assinatura</label><select id="f-status">${["piloto", "ativo", "inadimplente", "suspenso", "cancelado"].map((s) => opt(s, n?.status ?? "piloto")).join("")}</select></div>
+      <div><label>Bot</label><select id="f-bot">${opt("true", String(n?.bot_ativo ?? true), "Ligado")}${opt("false", String(n?.bot_ativo ?? true), "Desligado (emergência)")}</select></div>
+    </div>
+    <hr class="sep"><h3>WhatsApp</h3>
+    <div class="tres">
+      <div><label>Phone number ID (Meta)</label><input id="f-pnid" value="${esc(n?.qa ? "" : n?.wa_phone_number_id ?? "")}" ${n?.qa ? "disabled placeholder='QA-TESTE'" : ""} placeholder="ex.: 1364793380061459"></div>
+      <div><label>WhatsApp Business Account ID</label><input id="f-waba" value="${esc(n?.wa_waba_id ?? "")}"></div>
+      <div><label>Envio das respostas</label><select id="f-envio">${opt("simulado", c.envio ?? "simulado", "Simulação (não envia)")}${opt("whatsapp", c.envio ?? "simulado", "WhatsApp real")}</select></div>
+    </div>
+    <label>WhatsApp da equipe para avisos (até 5, separados por vírgula)</label>
+    <input id="f-aviso" value="${esc((c.aviso_equipe_whatsapp ?? []).join(", "))}" placeholder="5521988887777, 5521977776666">
+    ${novo ? "" : seg("wa_token", "Token do WhatsApp (permanente, do usuário do sistema)", "Fica guardado no cofre do Supabase; ninguém vê o valor depois de salvo.")}
+    <hr class="sep"><h3>Regras de agenda</h3>
+    <div class="tres">
+      <div><label>Desmarcar até (horas antes)</label><input id="f-cancel" type="number" min="0" value="${esc(c.cancelamento_min_horas ?? 24)}"></div>
+      <div><label>Antecedência mínima (horas)</label><input id="f-antec" type="number" min="0" value="${esc(c.antecedencia_min_horas ?? 2)}"></div>
+      <div><label>Janela de agendamento (dias)</label><input id="f-janela" type="number" min="1" value="${esc(c.janela_agendamento_dias ?? 30)}"></div>
+    </div>
+    <div class="duas">
+      <div><label>Endereço</label><input id="f-end" value="${esc(c.endereco === "TODO" ? "" : c.endereco ?? "")}"></div>
+      <div class="duas"><div><label>Tom</label><select id="f-tom">${opt("informal", c.tom ?? "informal", "Informal")}${opt("formal", c.tom ?? "informal", "Formal")}</select></div>
+        <div><label>Emojis</label><select id="f-emoji">${opt("true", String(c.emoji ?? true), "Sim (até 1)")}${opt("false", String(c.emoji ?? true), "Não")}</select></div></div>
+    </div>
+    <label>Informações extras para o bot (opcional)</label><textarea id="f-info" placeholder="Ex.: estacionamento no local; trazer toalha.">${esc(c.informacoes ?? "")}</textarea>
+    ${novo ? "" : `<hr class="sep"><h3>Cobrança (Asaas) — para a próxima etapa</h3>
+      ${seg("asaas_key", "Chave da API do Asaas", "Usada para gerar Pix.")}
+      ${seg("asaas_webhook_token", "Token do webhook do Asaas", "Confere que os avisos de pagamento vêm mesmo do Asaas.")}`}
+    <div class="linha" style="margin-top:16px"><button class="btn prim" id="salvar">${novo ? "Criar cliente" : "Salvar alterações"}</button><span class="muted peq">Segredos são salvos pelos botões ao lado de cada um.</span></div>
+    <div id="editor-erro" class="erro-msg oculto" style="margin-top:12px"></div>`;
+  ed.classList.remove("oculto");
+  ed.scrollIntoView({ behavior: "smooth" });
+  $("#fechar").onclick = () => ed.classList.add("oculto");
+
+  $("#salvar").onclick = async () => {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const dados = {
+      nome: $("#f-nome").value, vertical_id: $("#f-vertical").value, status: $("#f-status").value,
+      bot_ativo: $("#f-bot").value === "true", wa_waba_id: $("#f-waba").value,
+      config: {
+        envio: $("#f-envio").value,
+        aviso_equipe_whatsapp: $("#f-aviso").value.split(",").map((x) => x.replace(/\D/g, "")).filter((x) => x.length >= 10),
+        cancelamento_min_horas: num("#f-cancel"), antecedencia_min_horas: num("#f-antec"), janela_agendamento_dias: num("#f-janela"),
+        endereco: $("#f-end").value.trim() || "TODO", tom: $("#f-tom").value, emoji: $("#f-emoji").value === "true",
+        informacoes: $("#f-info").value.trim() || null,
+      },
+    };
+    if (!n?.qa) dados.wa_phone_number_id = $("#f-pnid").value;
+    if (dados.config.envio === "whatsapp" && !novo && !n.segredos_configurados?.wa_token) {
+      if (!window.__confirmouEnvio) { window.__confirmouEnvio = true; $("#editor-erro").textContent = "Atenção: envio real sem token do WhatsApp salvo. Clique em Salvar de novo para confirmar mesmo assim."; $("#editor-erro").classList.remove("oculto"); return; }
+    }
+    window.__confirmouEnvio = false;
+    try {
+      const id = await rpc("admin_salvar_negocio", { p_id: n?.id ?? null, p_dados: dados });
+      toast(novo ? "Cliente criado" : "Alterações salvas");
+      await carregarClientes();
+      abrirEditor(negocios.find((x) => x.id === id));
+    } catch (e) { $("#editor-erro").textContent = e.message; $("#editor-erro").classList.remove("oculto"); }
+  };
+  ed.querySelectorAll("[data-seg]").forEach((b) => b.onclick = () => salvarSegredo(n, b.dataset.seg, $("#seg-" + b.dataset.seg).value));
+  ed.querySelectorAll("[data-apagar]").forEach((b) => b.onclick = () => {
+    if (b.dataset.conf !== "1") { b.dataset.conf = "1"; b.textContent = "Confirmar"; return; }
+    salvarSegredo(n, b.dataset.apagar, "");
+  });
+}
+
+async function salvarSegredo(n, tipo, valor) {
+  if (valor === undefined) return;
+  try {
+    if (valor !== "" && valor.trim().length < 8) throw new Error("Valor muito curto para ser um token.");
+    const r = await rpc("admin_definir_segredo", { p_business_id: n.id, p_tipo: tipo, p_valor: valor });
+    toast(r.configurado ? `Segredo salvo (termina em ${r.final})` : "Segredo apagado");
+    await carregarClientes();
+    abrirEditor(negocios.find((x) => x.id === n.id));
+  } catch (e) { $("#editor-erro").textContent = e.message; $("#editor-erro").classList.remove("oculto"); }
+}
+
+// ---------------------------------------------------------------------
+// Erros (incidentes)
+// ---------------------------------------------------------------------
+async function contarErros() {
+  try {
+    const l = await rpc("admin_incidentes", { p_status: "aberto", p_limite: 500 });
+    const c = $("#cont-erros"); c.textContent = l.length; c.classList.toggle("oculto", !l.length);
+  } catch { /* silencioso */ }
+}
+async function carregarErros() {
+  const alvo = $("#lista-erros");
+  alvo.innerHTML = '<p class="muted">Carregando…</p>';
+  try {
+    const l = await rpc("admin_incidentes", { p_status: $("#filtro-erros").value, p_limite: 300 });
+    contarErros();
+    if (!l.length) { alvo.innerHTML = '<div class="card muted">Nenhum erro nesta lista. 🎉</div>'; return; }
+    alvo.innerHTML = l.map((i) => `<div class="card" style="margin-bottom:10px">
+      <div class="linha entre"><div><b>${esc(i.negocio)}</b> · <span class="mono">${esc(i.etapa)}</span></div>
+        <span class="chip ${i.status === "aberto" ? "bad" : i.status === "resolvido" ? "ok" : ""}">${esc(i.status)}</span></div>
+      <div style="margin-top:6px">${esc(i.assinatura)}</div>
+      <div class="muted peq" style="margin-top:4px">${i.ocorrencias} ocorrência(s) · primeira ${data(i.primeiro_em)} · última ${data(i.ultimo_em)}${i.nota ? " · nota: " + esc(i.nota) : ""}</div>
+      <details style="margin-top:8px"><summary class="peq">Detalhes</summary><pre>${esc(JSON.stringify(i.exemplo, null, 2))}</pre>
+        ${i.ultimo_trace ? `<button class="btn" style="margin-top:8px" data-trace="${i.ultimo_trace}">Ver passo a passo da última ocorrência</button><pre class="oculto" id="trace-${i.ultimo_trace}"></pre>` : ""}</details>
+      <div class="linha" style="margin-top:10px">
+        <input placeholder="Nota (opcional): o que foi feito" id="nota-${i.id}" style="max-width:420px">
+        ${i.status !== "resolvido" ? `<button class="btn prim" data-inc="${i.id}" data-st="resolvido">Resolvido</button>` : ""}
+        ${i.status !== "ignorado" ? `<button class="btn" data-inc="${i.id}" data-st="ignorado">Ignorar</button>` : ""}
+        ${i.status !== "aberto" ? `<button class="btn" data-inc="${i.id}" data-st="aberto">Reabrir</button>` : ""}
+      </div></div>`).join("");
+    alvo.querySelectorAll("[data-inc]").forEach((b) => b.onclick = async () => {
+      try { await rpc("admin_atualizar_incidente", { p_id: Number(b.dataset.inc), p_status: b.dataset.st, p_nota: $("#nota-" + b.dataset.inc).value || null }); toast("Atualizado"); carregarErros(); }
+      catch (e) { toast(e.message); }
+    });
+    alvo.querySelectorAll("[data-trace]").forEach((b) => b.onclick = async () => {
+      const p = $("#trace-" + b.dataset.trace);
+      const t = await rpc("admin_trace", { p_trace: b.dataset.trace });
+      p.textContent = t.map((x) => `${new Date(x.em).toLocaleTimeString("pt-BR")}  ${x.nivel.padEnd(5)} ${x.etapa}  ${JSON.stringify(x.detalhe)}${x.duracao_ms ? "  (" + x.duracao_ms + "ms)" : ""}`).join("\n");
+      p.classList.remove("oculto");
+    });
+  } catch (e) { alvo.innerHTML = `<div class="erro-msg">${esc(e.message)}</div>`; }
+}
+$("#filtro-erros").onchange = carregarErros;
+$("#atualizar-erros").onclick = carregarErros;
+
+// ---------------------------------------------------------------------
+// Testes automáticos
+// ---------------------------------------------------------------------
+const NOMES_QA = {
+  paciente_novo: "Paciente novo pede o nome", agendar_e_remarcar: "Agendar e remarcar",
+  desmarcar_menos_24h: "Desmarcar com menos de 24h", audio: "Mensagem de áudio",
+  disputa_horario: "Dois pacientes, mesmo horário", fora_do_assunto: "Pergunta fora do assunto",
+  injecao_prompt: "Tentar extrair instruções", injecao_outro_cliente: "Mexer na sessão de outro paciente", saude: "Dúvida de saúde",
+};
+async function dispararQA(lote, token) {
+  const r = await fetch(URL_QA, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lote, token }) });
+  if (!r.ok) throw new Error("A função de testes respondeu " + r.status);
+}
+$("#rodar-qa").onclick = async () => {
+  $("#rodar-qa").disabled = true;
+  try {
+    const [l] = await rpc("qa_criar_lote");
+    await dispararQA(l.lote_id, l.token);
+    toast("Testes iniciados");
+    carregarQA();
+  } catch (e) { toast(e.message); }
+  $("#rodar-qa").disabled = false;
+};
+$("#retomar-qa").onclick = async () => {
+  const r = await rpc("admin_qa_resultados");
+  if (!r || r.lote.status !== "rodando") { toast("Nenhum lote em andamento"); return; }
+  await dispararQA(r.lote.id, r.lote.token).then(() => toast("Retomado")).catch((e) => toast(e.message));
+  carregarQA();
+};
+async function carregarQA() {
+  clearTimeout(timerQA);
+  let r;
+  try { r = await rpc("admin_qa_resultados"); } catch (e) { $("#resumo-qa").innerHTML = `<div class="erro-msg">${esc(e.message)}</div>`; return; }
+  if (!r) return;
+  const res = r.resultados;
+  const cont = (s) => res.filter((x) => x.status === s).length;
+  const travado = res.some((x) => x.travado);
+  $("#resumo-qa").innerHTML = `<div class="linha entre"><div><b>Lote de ${data(r.lote.criado_em)}</b> · ${esc(r.lote.status)}</div>
+    <div class="linha"><span class="chip ok">${cont("passou")} passou</span><span class="chip bad">${cont("falhou") + cont("erro")} falhou</span>
+    <span class="chip">${cont("pulado")} pulado</span><span class="chip info">${cont("pendente") + cont("rodando")} na fila</span></div></div>
+    ${travado ? '<div class="aviso" style="margin-top:10px">Um passo parou no meio (limite de tempo da função). Clique em Retomar.</div>' : ""}`;
+  $("#lista-qa").innerHTML = res.map((x) => {
+    const cor = { passou: "ok", falhou: "bad", erro: "bad", pulado: "", rodando: "info", pendente: "" }[x.status];
+    return `<div class="card" style="margin-bottom:10px"><details ${x.status === "falhou" || x.status === "erro" ? "open" : ""}>
+      <summary class="linha entre" style="list-style:none"><b>${x.ordem}. ${esc(NOMES_QA[x.cenario] ?? x.cenario)}</b><span class="chip ${cor}">${esc(x.status)}${x.status === "rodando" ? " · passo " + (x.passo + 1) : ""}</span></summary>
+      ${x.erro ? `<div class="erro-msg" style="margin-top:8px">${esc(x.erro)}</div>` : ""}
+      <div style="margin-top:8px">${(x.checagens ?? []).map((c) => `<div class="check">${c.ok ? "✅" : "❌"} ${esc(c.nome)}${c.detalhe && !c.ok ? `<span class="det">${esc(c.detalhe)}</span>` : ""}</div>`).join("")}</div>
+      <div class="conversa">${(x.conversa ?? []).map((m) => `<div class="bolha ${m.de}">${esc(m.texto)}</div>`).join("")}</div>
+    </details></div>`;
+  }).join("");
+  if (r.lote.status === "rodando") timerQA = setTimeout(carregarQA, 6000);
+}
+
+// ---------------------------------------------------------------------
+// Auditoria
+// ---------------------------------------------------------------------
+const ACOES = { criar_negocio: "Criou cliente", atualizar_negocio: "Alterou cliente", definir_segredo: "Salvou segredo", apagar_segredo: "Apagou segredo",
+  incidente_resolvido: "Marcou erro como resolvido", incidente_ignorado: "Ignorou erro", incidente_aberto: "Reabriu erro" };
+async function carregarAuditoria() {
+  try {
+    const l = await rpc("admin_auditoria_recente", { p_limite: 100 });
+    $("#lista-auditoria").innerHTML = l.map((a) => `<tr><td>${data(a.em)}</td><td>${esc(ACOES[a.acao] ?? a.acao)}</td><td>${esc(a.negocio ?? "—")}</td>
+      <td class="mono">${esc(JSON.stringify(a.detalhe))}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">Nada ainda.</td></tr>';
+  } catch (e) { $("#lista-auditoria").innerHTML = `<tr><td colspan="4" class="erro-msg">${esc(e.message)}</td></tr>`; }
+}
+
+sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") location.reload(); });
+iniciar();
+</script>
+</body>
+</html>
