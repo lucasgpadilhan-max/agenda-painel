@@ -105,6 +105,7 @@
       <button data-aba="clientes" class="ativo">Clientes</button>
       <button data-aba="erros">Erros <span id="cont-erros" class="cont oculto"></span></button>
       <button data-aba="testes">Testes</button>
+      <button data-aba="segmentos">Segmentos</button>
       <button data-aba="auditoria">Auditoria</button>
     </nav>
     <div class="direita"><span id="quem"></span><button class="btn" id="sair">Sair</button></div>
@@ -137,6 +138,14 @@
       <p class="muted peq">Roda no "Negócio de Teste (QA)", isolado e em modo simulação: nenhuma mensagem real é enviada. Usa a IA padrão da plataforma de verdade, então cada lote consome alguns tokens.</p>
       <div id="resumo-qa" class="card" style="margin-bottom:12px">Nenhum lote ainda.</div>
       <div id="lista-qa"></div>
+    </section>
+
+    <section id="aba-segmentos" class="oculto">
+      <div class="linha entre" style="margin-bottom:12px"><h2 style="margin:0">Segmentos</h2></div>
+      <p class="muted peq">Um segmento é o modelo de um ramo de negócio. <b>Textos</b> (nomes, instruções, regras e perguntas) valem na hora para todos os clientes do segmento.
+        <b>Padrões</b> (serviços, preços, horários e regras de agenda) só preenchem clientes novos. Para um ramo novo, duplique o Genérico.</p>
+      <div id="lista-segmentos" class="grid-cards"></div>
+      <div id="editor-segmento" class="card oculto" style="margin-top:14px"></div>
     </section>
 
     <section id="aba-auditoria" class="oculto">
@@ -175,6 +184,7 @@ const PROVEDORES = {
 const ABAS_NEG = [["visao", "Visão geral"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
   ["avisos", "Avisos"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
 
+let segmentos = [];
 let negocios = [], verticais = [], plataforma = null, atual = null, abaNeg = "visao", timerQA = null, filtroErros = "aberto";
 
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 4000); }
@@ -243,7 +253,8 @@ $("#sair").onclick = async () => { await sb.auth.signOut(); location.reload(); }
 
 function irPara(aba) {
   $$("nav.topo button").forEach((x) => x.classList.toggle("ativo", x.dataset.aba === aba));
-  for (const a of ["clientes", "erros", "testes", "auditoria"]) $("#aba-" + a).classList.toggle("oculto", a !== aba);
+  for (const a of ["clientes", "erros", "testes", "segmentos", "auditoria"]) $("#aba-" + a).classList.toggle("oculto", a !== aba);
+  if (aba === "segmentos") carregarSegmentos();
   if (aba === "erros") carregarResumoErros();
   if (aba === "testes") carregarQA();
   if (aba === "auditoria") carregarAuditoria();
@@ -275,20 +286,30 @@ async function carregarClientes() {
 $("#recarregar").onclick = async () => { await carregarClientes(); if (atual) abrirNegocio(atual.negocio.id, abaNeg); };
 $("#novo").onclick = () => novoCliente();
 
-function novoCliente() {
+async function novoCliente() {
   atual = null; $$(".item-neg").forEach((b) => b.classList.remove("ativo"));
   const det = $("#detalhe");
+  try { segmentos = await rpc("admin_listar_segmentos"); } catch (e) { return erroEm(det, e); }
+  const segPadrao = segmentos.some((x) => x.id === "generico") ? "generico" : segmentos[0]?.id;
   det.innerHTML = `<h2>Novo cliente</h2>
-    <p class="muted peq">Crie com o básico; depois o painel mostra o passo a passo do que falta para colocar no ar.</p>
+    <p class="muted peq">O cliente nasce com os serviços, horários e regras do segmento. Depois é só ajustar e seguir o passo a passo.</p>
     <div class="duas">
       <div><label>Nome do negócio</label><input id="n-nome" placeholder="Ex.: Clínica Movimento"></div>
-      <div><label>Segmento</label><select id="n-vertical">${verticais.map((v) => `<option value="${esc(v.id)}">${esc(v.nome)}</option>`).join("")}</select></div>
+      <div><label>Segmento</label><select id="n-vertical">${segmentos.map((v) => opt(v.id, segPadrao, v.nome)).join("")}</select>
+        <div class="muted peq" id="n-desc"></div></div>
+      <div><label>Nome do primeiro profissional</label><input id="n-prof"></div>
     </div>
     <div class="linha" style="margin-top:14px"><button class="btn prim" id="n-criar">Criar cliente</button></div>
     <div id="n-erro" class="erro-msg oculto" style="margin-top:12px"></div>`;
+  const aoTrocar = () => {
+    const sg = segmentos.find((x) => x.id === $("#n-vertical").value) ?? {};
+    $("#n-prof").value = sg.padroes?.profissional ?? "Profissional";
+    $("#n-desc").textContent = `${sg.descricao ?? ""} ${sg.padroes?.servicos?.length ? "· " + sg.padroes.servicos.length + " serviço(s) sugerido(s)" : ""}`;
+  };
+  $("#n-vertical").onchange = aoTrocar; aoTrocar();
   $("#n-criar").onclick = async () => {
     try {
-      const id = await rpc("admin_salvar_negocio", { p_id: null, p_dados: { nome: $("#n-nome").value, vertical_id: $("#n-vertical").value } });
+      const id = await rpc("admin_criar_cliente", { p_dados: { nome: $("#n-nome").value, vertical_id: $("#n-vertical").value, profissional: $("#n-prof").value.trim() || null } });
       toast("Cliente criado"); await carregarClientes(); abrirNegocio(id, "visao");
     } catch (e) { const x = $("#n-erro"); x.textContent = e.message; x.classList.remove("oculto"); }
   };
@@ -365,6 +386,26 @@ async function salvarSegredo(tipo, valor) {
     toast(r.configurado ? `Salvo no cofre (termina em ${r.final})` : "Segredo apagado");
     await recarregar();
   } catch (e) { toast(e.message); }
+}
+const VOC_CHAVES = [["cliente", "Cliente"], ["clientes", "Clientes"], ["atendimento", "Atendimento"], ["atendimentos", "Atendimentos"], ["profissional", "Profissional"]];
+const VOC_PADRAO = { cliente: "cliente", clientes: "clientes", atendimento: "atendimento", atendimentos: "atendimentos", profissional: "profissional" };
+function vocDosCampos(prefixo) {
+  const v = {};
+  for (const [k] of VOC_CHAVES) { const x = ($("#" + prefixo + k)?.value ?? "").trim(); if (x) v[k] = x; }
+  return Object.keys(v).length ? v : null;
+}
+// "08:00-12:00, 13h-18h" por dia -> [{dia_semana, inicio, fim}]
+function faixasDeInputs(inputs) {
+  const faixas = [];
+  for (const inp of inputs) {
+    for (const parte of inp.value.split(",").map((x) => x.trim()).filter(Boolean)) {
+      const m = parte.replace(/(\d)h(\d{2})/gi, "$1:$2").replace(/(\d)h/gi, "$1").match(/^(\d{1,2})(?::(\d{2}))?\s*(?:-|–|às|a)\s*(\d{1,2})(?::(\d{2}))?$/);
+      if (!m) throw new Error(`${DIAS[inp.dataset.dia]}: não entendi "${parte}". Use 08:00-12:00.`);
+      const f = (h, mi) => String(h).padStart(2, "0") + ":" + (mi ?? "00");
+      faixas.push({ dia_semana: Number(inp.dataset.dia), inicio: f(m[1], m[2]), fim: f(m[3], m[4]) });
+    }
+  }
+  return faixas;
 }
 const brl = (v) => v == null ? "—" : "R$ " + Number(v).toFixed(2).replace(".", ",");
 const dataCurta = (d) => d ? d.split("-").reverse().join("/") : "—";
@@ -527,6 +568,19 @@ function abaGeral(alvo) {
       <div><label>Antecedência mínima para marcar (horas)</label><input id="g-antec" type="number" min="0" value="${esc(c.antecedencia_min_horas ?? 2)}"></div>
       <div><label>Agenda aberta até (dias à frente)</label><input id="g-janela" type="number" min="1" value="${esc(c.janela_agendamento_dias ?? 30)}"></div>
     </div>
+    <h4>Regras do bot</h4>
+    <div class="duas">
+      <div class="dica"><div class="linha entre"><b>Herdado: vem do segmento ${esc(atual.segmento?.nome ?? "")}</b>
+          <a href="#" id="g-ir-seg" class="peq">editar segmento</a></div>
+        <div class="peq" style="white-space:pre-wrap;margin-top:6px">${esc(atual.segmento?.regras_bot || "Sem regras extras no segmento.")}</div>
+        <div class="muted peq" style="margin-top:6px">Chama de: ${esc(Object.entries(atual.segmento?.vocabulario ?? {}).map(([k, v]) => k + " = " + v).join(", ") || "padrão")}</div></div>
+      <div><label>Regras deste cliente (uma por linha; somam às do segmento)</label>
+        <textarea id="g-regras" placeholder="Ex.: Atendemos só maiores de 12 anos">${esc(c.regras_bot ?? "")}</textarea></div>
+    </div>
+    <label>Como o bot chama as coisas neste cliente (vazio = usa o do segmento)</label>
+    <div class="tres">${VOC_CHAVES.map(([k, r]) => `<div><label class="peq">${r}</label><input id="g-voc-${k}" value="${esc(c.vocabulario?.[k] ?? "")}" placeholder="${esc(atual.segmento?.vocabulario?.[k] ?? VOC_PADRAO[k])}"></div>`).join("")}</div>
+    <div class="linha" style="margin-top:10px"><button class="btn" id="g-previa">Ver como o bot vai falar</button><span class="muted peq">Mostra o texto de instruções que a IA recebe (salve antes para ver as mudanças).</span></div>
+    <pre id="g-previa-texto" class="oculto" style="max-height:420px"></pre>
     <h4>Perguntas frequentes deste negócio</h4>
     <p class="muted peq">O bot responde com estas informações. As do segmento (abaixo) valem para todos os clientes do mesmo tipo.</p>
     <div id="g-faq"></div>
@@ -534,6 +588,11 @@ function abaGeral(alvo) {
     ${atual.faq_segmento?.length ? `<details style="margin-top:10px"><summary class="peq muted">Perguntas do segmento (${atual.faq_segmento.length})</summary>
       <ul class="peq">${atual.faq_segmento.map((f) => `<li><b>${esc(f.pergunta)}</b> — ${esc(f.resposta)}</li>`).join("")}</ul></details>` : ""}
     <div class="linha" style="margin-top:16px"><button class="btn prim" id="g-salvar">Salvar</button></div>`;
+  $("#g-ir-seg", alvo).onclick = (ev) => { ev.preventDefault(); irPara("segmentos"); editarSegmento(atual.segmento?.id); };
+  $("#g-previa", alvo).onclick = async () => {
+    const pre = $("#g-previa-texto"); pre.classList.remove("oculto"); pre.textContent = "Montando…";
+    try { const j = await acaoServidor("previa_prompt", atual.negocio.id); pre.textContent = j.ok ? j.texto : j.erro; } catch (e) { pre.textContent = e.message; }
+  };
   const listaFaq = $("#g-faq", alvo);
   const linhaFaq = (f = {}) => {
     const d = document.createElement("div"); d.className = "duas"; d.style.marginTop = "6px";
@@ -551,6 +610,7 @@ function abaGeral(alvo) {
       config: {
         endereco: $("#g-end").value.trim() || "TODO", tom: $("#g-tom").value, emoji: $("#g-emoji").value === "true",
         informacoes: $("#g-info").value.trim() || null, faq: faqNova.length ? faqNova : null,
+        regras_bot: $("#g-regras").value.trim() || null, vocabulario: vocDosCampos("g-voc-"),
         cancelamento_min_horas: num("#g-cancel"), antecedencia_min_horas: num("#g-antec"), janela_agendamento_dias: num("#g-janela"),
       },
     });
@@ -601,15 +661,7 @@ function abaAgenda(alvo) {
   $$("[data-salvar-hor]", alvo).forEach((b) => b.onclick = async () => {
     const rid = b.dataset.salvarHor;
     try {
-      const faixas = [];
-      for (const inp of $$(`[data-hor="${rid}"]`, alvo)) {
-        for (const parte of inp.value.split(",").map((x) => x.trim()).filter(Boolean)) {
-          const m = parte.replace(/(\d)h(\d{2})/gi, "$1:$2").replace(/(\d)h/gi, "$1").match(/^(\d{1,2})(?::(\d{2}))?\s*(?:-|–|às|a)\s*(\d{1,2})(?::(\d{2}))?$/);
-          if (!m) throw new Error(`${DIAS[inp.dataset.dia]}: não entendi "${parte}". Use 08:00-12:00.`);
-          const f = (h, mi) => String(h).padStart(2, "0") + ":" + (mi ?? "00");
-          faixas.push({ dia_semana: Number(inp.dataset.dia), inicio: f(m[1], m[2]), fim: f(m[3], m[4]) });
-        }
-      }
+      const faixas = faixasDeInputs($$(`[data-hor="${rid}"]`, alvo));
       await rpc("admin_salvar_horarios", { p_business_id: atual.negocio.id, p_resource_id: rid, p_faixas: faixas });
       toast("Horários salvos"); recarregar();
     } catch (e) { toast(e.message); }
@@ -798,10 +850,11 @@ function abaErrosNegocio(alvo) {
 }
 
 // Lista de incidentes (usada na aba do cliente e na aba global).
-async function listarIncidentes(alvo, businessId, aoMudar) {
+async function listarIncidentes(alvo, businessId, aoMudar, soPlataforma = false) {
   alvo.innerHTML = '<p class="muted">Carregando…</p>';
   try {
-    const l = await rpc("admin_incidentes", { p_status: filtroErros, p_limite: 300, p_business_id: businessId });
+    let l = await rpc("admin_incidentes", { p_status: filtroErros, p_limite: 300, p_business_id: businessId });
+    if (soPlataforma) l = l.filter((x) => !x.business_id);
     if (!l.length) { alvo.innerHTML = '<div class="card muted">Nenhum erro nesta lista. 🎉</div>'; return; }
     alvo.innerHTML = l.map((i) => `<div class="card" style="margin-bottom:10px">
       <div class="linha entre"><div><span class="mono">${esc(i.etapa)}</span> · <span class="muted peq">${i.ocorrencias}× · última ${data(i.ultimo_em)}</span></div>
@@ -829,9 +882,15 @@ async function listarIncidentes(alvo, businessId, aoMudar) {
         p.classList.remove("oculto");
       } catch (e) { toast(e.message); }
     });
-    $$("[data-claude]", alvo).forEach((b) => b.onclick = () => {
-      const i = l.find((x) => String(x.id) === b.dataset.claude);
-      copiar(`Erro na plataforma de agenda (projeto Supabase vesskijhvnuuntlwdlze)\nCliente: ${i.negocio} (${i.business_id})\nIncidente #${i.id} · etapa ${i.etapa} · ${i.ocorrencias} ocorrência(s) · última ${i.ultimo_em}\nErro: ${i.assinatura}\nTrace da última ocorrência: ${i.ultimo_trace ?? "—"}\nInvestigue pelo conector do Supabase (event_log, incidentes) e proponha a correção antes de aplicar.`);
+    $$("[data-claude]", alvo).forEach((b) => b.onclick = async () => {
+      try {
+        const ctx = await rpc("admin_suporte_incidente", { p_id: Number(b.dataset.claude) });
+        copiar(`Erro na plataforma de agenda (Supabase vesskijhvnuuntlwdlze). Siga o "Roteiro de suporte a erros" do CLAUDE.md.
+Investigue pelo conector do Supabase (admin_suporte_incidente, logs da função), ache a causa e me proponha a correção; só aplique com o meu ok.
+
+Contexto do incidente #${b.dataset.claude} (sem segredos):
+${JSON.stringify(ctx, null, 2)}`);
+      } catch (e) { toast(e.message); }
     });
   } catch (e) { erroEm(alvo, e); }
 }
@@ -862,12 +921,132 @@ async function carregarResumoErros() {
     </div>`).join("") || '<p class="muted">Nenhum cliente.</p>';
     $$("[data-erros-neg]", alvo).forEach((c) => c.onclick = () => {
       const id = c.dataset.errosNeg;
-      if (!id) return toast("Erros sem cliente identificado: veja no Supabase (tabela incidentes).");
+      if (!id) {
+        let box = $("#erros-plataforma");
+        if (!box) { box = document.createElement("div"); box.id = "erros-plataforma"; box.style.marginTop = "14px"; alvo.after(box); }
+        box.innerHTML = '<h3 style="margin-bottom:8px">Plataforma (erros sem cliente identificado)</h3><div id="ep-lista"></div>';
+        return listarIncidentes($("#ep-lista"), null, carregarResumoErros, true);
+      }
       irPara("clientes"); abrirNegocio(id, "erros");
     });
   } catch (e) { erroEm(alvo, e); }
 }
 $("#atualizar-erros").onclick = carregarResumoErros;
+
+
+// ---------------------------------------------------------------------
+// Segmentos (modelos por ramo de negócio)
+// ---------------------------------------------------------------------
+async function carregarSegmentos() {
+  const alvo = $("#lista-segmentos");
+  try { segmentos = await rpc("admin_listar_segmentos"); } catch (e) { return erroEm(alvo, e); }
+  alvo.innerHTML = segmentos.map((g) => `<div class="card">
+      <div class="linha entre"><b>${esc(g.nome)}</b>${g.dados_sensiveis ? '<span class="chip warn">dado de saúde</span>' : ""}</div>
+      <div class="muted peq" style="margin-top:4px">${esc(g.descricao ?? "")}</div>
+      <div class="peq" style="margin-top:6px">${g.clientes} cliente(s) · ${(g.padroes?.servicos ?? []).length} serviço(s) sugerido(s) · <span class="mono">${esc(g.id)}</span></div>
+      <div class="linha" style="margin-top:10px"><button class="btn mini" data-edit-seg="${esc(g.id)}">Editar</button>
+        <button class="btn mini" data-dup-seg="${esc(g.id)}">Duplicar</button>
+        ${g.id === "generico" ? "" : `<button class="btn mini perigo" data-exc-seg="${esc(g.id)}" ${g.clientes ? "disabled title='Tem clientes usando'" : ""}>Excluir</button>`}</div>
+    </div>`).join("");
+  $$("[data-edit-seg]", alvo).forEach((b) => b.onclick = () => editarSegmento(b.dataset.editSeg));
+  $$("[data-dup-seg]", alvo).forEach((b) => b.onclick = () => duplicarSegmento(b.dataset.dupSeg));
+  $$("[data-exc-seg]", alvo).forEach((b) => b.onclick = async () => {
+    if (b.dataset.conf !== "1") { b.dataset.conf = "1"; b.textContent = "Confirmar exclusão"; return; }
+    try { await rpc("admin_excluir_segmento", { p_id: b.dataset.excSeg }); toast("Segmento excluído"); carregarSegmentos(); } catch (e) { toast(e.message); }
+  });
+}
+
+function duplicarSegmento(origem) {
+  const ed = $("#editor-segmento"), o = segmentos.find((x) => x.id === origem);
+  ed.classList.remove("oculto");
+  ed.innerHTML = `<h3>Novo segmento a partir de "${esc(o?.nome ?? origem)}"</h3>
+    <div class="duas"><div><label>Nome (ex.: Salão de beleza)</label><input id="sd-nome"></div>
+      <div><label>Código (minúsculas, sem espaço; não muda depois)</label><input id="sd-id" placeholder="salao"></div></div>
+    <div class="linha" style="margin-top:12px"><button class="btn prim" id="sd-criar">Criar segmento</button><button class="btn" id="sd-cancelar">Cancelar</button></div>`;
+  $("#sd-nome").oninput = () => { if (!$("#sd-id").dataset.mexeu) $("#sd-id").value = $("#sd-nome").value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30); };
+  $("#sd-id").oninput = () => { $("#sd-id").dataset.mexeu = "1"; };
+  $("#sd-cancelar").onclick = () => ed.classList.add("oculto");
+  $("#sd-criar").onclick = async () => {
+    try {
+      const id = await rpc("admin_duplicar_segmento", { p_origem: origem, p_novo_id: $("#sd-id").value.trim(), p_nome: $("#sd-nome").value.trim() });
+      toast("Segmento criado"); await carregarSegmentos(); editarSegmento(id);
+    } catch (e) { toast(e.message); }
+  };
+}
+
+function editarSegmento(id) {
+  const g = segmentos.find((x) => x.id === id);
+  const ed = $("#editor-segmento");
+  if (!g) { carregarSegmentos().then(() => segmentos.some((x) => x.id === id) && editarSegmento(id)); return; }
+  const p = g.padroes ?? {}, cfg = p.config ?? {};
+  ed.classList.remove("oculto");
+  ed.innerHTML = `
+    <div class="linha entre"><h3>Segmento: ${esc(g.nome)} <span class="mono muted">${esc(g.id)}</span></h3><button class="btn mini" id="se-fechar">Fechar</button></div>
+    <div class="aviso" style="margin-top:8px">Textos valem na hora para os ${g.clientes} cliente(s) deste segmento. Serviços, preços e horários só afetam clientes novos.</div>
+    <h4>1. Identificação</h4>
+    <div class="duas"><div><label>Nome</label><input id="se-nome" value="${esc(g.nome)}"></div>
+      <div><label>Descrição</label><input id="se-desc" value="${esc(g.descricao ?? "")}"></div></div>
+    <label class="linha" style="color:var(--ink);font-weight:400"><input type="checkbox" id="se-saude" ${g.dados_sensiveis ? "checked" : ""}> Lida com dado de saúde (o bot não orienta e chama a equipe)</label>
+    <h4>2. Como o bot chama as coisas</h4>
+    <div class="tres">${VOC_CHAVES.map(([k, r]) => `<div><label class="peq">${r}</label><input id="se-voc-${k}" value="${esc(g.vocabulario?.[k] ?? "")}" placeholder="${VOC_PADRAO[k]}"></div>`).join("")}</div>
+    <h4>3. Instruções e regras do ramo</h4>
+    <label>Apresentação do bot</label><textarea id="se-base">${esc(g.prompt_base ?? "")}</textarea>
+    <label>Regras extras (uma por linha)</label><textarea id="se-regras" placeholder="Ex.: Não atendemos convênio">${esc(g.regras_bot ?? "")}</textarea>
+    <p class="muted peq">As regras de segurança da plataforma (não inventar horários, confirmar antes de desmarcar etc.) sempre valem acima destas.</p>
+    <h4>4. Perguntas frequentes do ramo</h4>
+    <div id="se-faq"></div><button class="btn mini" id="se-faq-add" style="margin-top:6px">+ Pergunta</button>
+    <h4>5. Padrões para clientes novos</h4>
+    <div class="tres">
+      <div><label>Desmarcar até (h antes)</label><input id="se-cancel" type="number" min="0" value="${esc(cfg.cancelamento_min_horas ?? 24)}"></div>
+      <div><label>Antecedência mínima (h)</label><input id="se-antec" type="number" min="0" value="${esc(cfg.antecedencia_min_horas ?? 2)}"></div>
+      <div><label>Agenda aberta (dias)</label><input id="se-janela" type="number" min="1" value="${esc(cfg.janela_agendamento_dias ?? 30)}"></div>
+      <div><label>Tom</label><select id="se-tom">${opt("informal", cfg.tom ?? "informal", "Informal")}${opt("formal", cfg.tom, "Formal")}</select></div>
+      <div><label>Emojis</label><select id="se-emoji">${opt("true", cfg.emoji ?? true, "Sim")}${opt("false", cfg.emoji ?? true, "Não")}</select></div>
+      <div><label>Nome do primeiro profissional</label><input id="se-prof" value="${esc(p.profissional ?? "")}" placeholder="Profissional"></div>
+    </div>
+    <label>Serviços sugeridos</label>
+    <table><thead><tr><th>Nome</th><th>Min</th><th>Preço</th><th>Cobrança</th><th>Sinal %</th><th></th></tr></thead><tbody id="se-servs"></tbody></table>
+    <button class="btn mini" id="se-serv-add" style="margin-top:6px">+ Serviço</button>
+    <label>Horário sugerido</label>
+    ${DIAS.map((d, i) => `<div class="hor-linha"><span class="peq">${d}</span><input data-se-hor data-dia="${i}" value="${esc((p.horarios ?? []).filter((h) => h.dia_semana === i).map((h) => h.inicio + "-" + h.fim).join(", "))}"></div>`).join("")}
+    <div class="linha" style="margin-top:16px"><button class="btn prim" id="se-salvar">Salvar segmento</button></div>`;
+  ed.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("#se-fechar").onclick = () => ed.classList.add("oculto");
+  const faqBox = $("#se-faq");
+  const linhaFaq = (f = {}) => {
+    const d = document.createElement("div"); d.className = "duas"; d.style.marginTop = "6px";
+    d.innerHTML = `<input class="fq-p" placeholder="Pergunta" value="${esc(f.pergunta ?? "")}"><div class="linha" style="flex-wrap:nowrap"><input class="fq-r" placeholder="Resposta" value="${esc(f.resposta ?? "")}"><button class="btn mini perigo">✕</button></div>`;
+    $("button", d).onclick = () => d.remove(); faqBox.appendChild(d);
+  };
+  (g.faq_padrao ?? []).forEach(linhaFaq); $("#se-faq-add").onclick = () => linhaFaq();
+  const tb = $("#se-servs");
+  const linhaServ = (sv = {}) => {
+    const tr = document.createElement("tr"); tr.className = "se-serv";
+    tr.innerHTML = `<td><input class="ss-nome" value="${esc(sv.nome ?? "")}"></td><td><input class="ss-min" type="number" min="5" value="${esc(sv.duracao_min ?? 60)}" style="width:70px"></td>
+      <td><input class="ss-preco" type="number" min="0" step="0.01" value="${esc(sv.preco ?? 0)}" style="width:90px"></td>
+      <td><select class="ss-cob">${opt("nenhuma", sv.cobranca ?? "nenhuma", "Não cobra")}${opt("sinal", sv.cobranca, "Sinal")}${opt("total", sv.cobranca, "Total")}</select></td>
+      <td><input class="ss-sinal" type="number" min="1" max="100" value="${esc(sv.sinal_percentual ?? 50)}" style="width:70px"></td>
+      <td><button class="btn mini perigo">✕</button></td>`;
+    $("button", tr).onclick = () => tr.remove(); tb.appendChild(tr);
+  };
+  (p.servicos ?? []).forEach(linhaServ); $("#se-serv-add").onclick = () => linhaServ();
+  $("#se-salvar").onclick = async () => {
+    try {
+      const num = (sel, padrao) => { const v = $(sel).value.trim(); return v === "" ? padrao : Number(v); };
+      const servicos = $$(".se-serv", tb).map((tr) => ({ nome: $(".ss-nome", tr).value.trim(), duracao_min: Number($(".ss-min", tr).value),
+        preco: Number($(".ss-preco", tr).value || 0), cobranca: $(".ss-cob", tr).value,
+        ...($(".ss-cob", tr).value === "sinal" ? { sinal_percentual: Number($(".ss-sinal", tr).value || 50) } : {}) })).filter((x) => x.nome);
+      await rpc("admin_salvar_segmento", { p_id: g.id, p_dados: {
+        nome: $("#se-nome").value.trim(), descricao: $("#se-desc").value.trim(), dados_sensiveis: $("#se-saude").checked,
+        vocabulario: vocDosCampos("se-voc-") ?? {}, prompt_base: $("#se-base").value.trim(), regras_bot: $("#se-regras").value.trim(),
+        faq_padrao: $$(".duas", faqBox).map((d) => ({ pergunta: $(".fq-p", d).value.trim(), resposta: $(".fq-r", d).value.trim() })).filter((f) => f.pergunta && f.resposta),
+        padroes: { config: { cancelamento_min_horas: num("#se-cancel", 24), antecedencia_min_horas: num("#se-antec", 2), janela_agendamento_dias: num("#se-janela", 30),
+                             tom: $("#se-tom").value, emoji: $("#se-emoji").value === "true" },
+                   profissional: $("#se-prof").value.trim() || "Profissional", servicos, horarios: faixasDeInputs($$("[data-se-hor]", ed)) } } });
+      toast("Segmento salvo"); await carregarSegmentos(); editarSegmento(g.id);
+    } catch (e) { toast(e.message); }
+  };
+}
 
 // ---------------------------------------------------------------------
 // Testes automáticos
@@ -921,7 +1100,8 @@ async function carregarQA() {
 // Auditoria
 // ---------------------------------------------------------------------
 const ACOES = { criar_negocio: "Criou cliente", atualizar_negocio: "Alterou cliente", definir_segredo: "Salvou segredo", apagar_segredo: "Apagou segredo",
-  incidente_resolvido: "Marcou erro como resolvido", incidente_ignorado: "Ignorou erro", incidente_aberto: "Reabriu erro",
+  incidente_resolvido: "Marcou erro como resolvido", salvar_segmento: "Salvou segmento", excluir_segmento: "Excluiu segmento",
+  criar_cliente_segmento: "Criou cliente a partir do segmento", incidente_ignorado: "Ignorou erro", incidente_aberto: "Reabriu erro",
   salvar_profissional: "Salvou profissional", salvar_servico: "Salvou serviço", salvar_horarios: "Salvou horários",
   salvar_plano: "Alterou plano", mensalidade_pago: "Registrou pagamento", mensalidade_pendente: "Desfez pagamento",
   mensalidade_isento: "Isentou mensalidade", desativar_negocio: "Desativou cliente", reativar_negocio: "Reativou cliente", excluir_negocio: "Excluiu cliente",
