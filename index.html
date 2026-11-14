@@ -188,7 +188,7 @@ const PROVEDORES = {
   gemini: { nome: "Google Gemini", modelos: ["gemini-3.5-flash-lite", "gemini-3.5-flash"], site: "https://aistudio.google.com/apikey" },
   openai: { nome: "OpenAI", modelos: ["gpt-5-mini", "gpt-5"], site: "https://platform.openai.com/api-keys" },
 };
-const ABAS_NEG = [["visao", "Visão geral"], ["conversas", "Conversas"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
+const ABAS_NEG = [["visao", "Visão geral"], ["config", "Configuração inicial"], ["conversas", "Conversas"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
   ["avisos", "Avisos"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
 
 let segmentos = [];
@@ -278,7 +278,7 @@ async function carregarClientes() {
   try { negocios = await rpc("admin_listar_negocios"); } catch (e) { return erroEm($("#lista-clientes"), e); }
   const cor = { piloto: "info", ativo: "ok", inadimplente: "bad", suspenso: "bad", cancelado: "bad" };
   $("#lista-clientes").innerHTML = negocios.map((n) => {
-    const pct = n.checklist_total ? Math.round(100 * n.checklist_ok / n.checklist_total) : 0;
+    const pct = n.obrig_total ? Math.round(100 * n.obrig_ok / n.obrig_total) : 0;
     return `<button class="item-neg ${atual?.negocio.id === n.id ? "ativo" : ""}" data-neg="${n.id}">
       <div class="linha entre"><b>${esc(n.nome)}</b>${n.erros_abertos ? `<span class="cont" title="erros abertos">${n.erros_abertos}</span>` : ""}</div>
       <div class="linha peq" style="margin-top:4px">
@@ -287,12 +287,16 @@ async function carregarClientes() {
         ${n.desativado_em ? '<span class="chip bad">desativado</span>' : n.bot_ativo ? "" : '<span class="chip bad">bot off</span>'}
         ${chipPagamento(n.pagamento)}
         ${n.aguardando ? `<span class="chip warn" title="conversas esperando a equipe">${n.aguardando} aguardando</span>` : ""}
+        ${n.pronto ? '<span class="chip ok" title="todos os obrigatórios prontos; falta ligar o envio real">pronto para ir ao ar</span>' : ""}
       </div>
-      <div class="barra" title="Configuração: ${n.checklist_ok}/${n.checklist_total}"><i style="width:${pct}%"></i></div>
-      <div class="muted peq" style="margin-top:3px">Configuração ${n.checklist_ok}/${n.checklist_total} · ${n.msgs_24h} msgs 24h</div>
+      <div class="barra" title="Obrigatórios: ${n.obrig_ok}/${n.obrig_total}"><i style="width:${pct}%"></i></div>
+      <div class="muted peq" style="margin-top:3px">Obrigatórios ${n.obrig_ok}/${n.obrig_total} · ${n.msgs_24h} msgs 24h</div>
     </button>`;
   }).join("") || '<p class="muted">Nenhum cliente.</p>';
-  $$("[data-neg]").forEach((b) => b.onclick = () => abrirNegocio(b.dataset.neg, "visao"));
+  $$("[data-neg]").forEach((b) => b.onclick = () => {
+    const n = negocios.find((x) => x.id === b.dataset.neg);
+    abrirNegocio(b.dataset.neg, n && n.envio !== "whatsapp" && !n.qa ? "config" : "visao");
+  });
   const total = negocios.reduce((t, n) => t + Number(n.aguardando || 0), 0);
   const ca = $("#cont-aguardando");
   ca.innerHTML = `Aguardando atendimento <span class="cont">${total}</span>`;
@@ -367,7 +371,7 @@ async function recarregar() { await carregarClientes(); await abrirNegocio(atual
 function desenharAba() {
   const alvo = $("#conteudo-neg");
   clearInterval(timerConversas); timerConversas = null;
-  const fn = { visao: abaVisao, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
+  const fn = { visao: abaVisao, config: abaConfig, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
   alvo.innerHTML = ""; fn(alvo);
 }
 
@@ -438,7 +442,8 @@ const opt = (v, atualV, rot) => `<option value="${esc(v)}" ${String(v) === Strin
 function abaVisao(alvo) {
   const n = atual.negocio, c = n.config;
   const resumo = negocios.find((x) => x.id === n.id) ?? {};
-  const grupos = atual.checklist;
+  const obrig = atual.checklist.filter((x) => x.nivel === "obrigatorio");
+  const obrigOk = obrig.filter((x) => x.ok).length;
   alvo.innerHTML = `
     <div class="numeros">
       <div><b>${resumo.msgs_24h ?? 0}</b><span class="muted peq">mensagens 24h</span></div>
@@ -447,10 +452,9 @@ function abaVisao(alvo) {
       <div><b>${atual.profissionais.filter((p) => p.ativo).length}</b><span class="muted peq">profissionais</span></div>
       <div><b>${atual.servicos.filter((s) => s.ativo).length}</b><span class="muted peq">serviços</span></div>
     </div>
-    <h4>Passo a passo para colocar no ar</h4>
-    <div>${grupos.map((g) => `<div class="check-item"><span class="ic">${g.ok ? "✅" : "⬜"}</span><span class="grp">${esc(g.grupo)}</span>
-      <span style="flex:1">${esc(g.item)}</span>${g.ok ? "" : `<button class="btn mini" data-ir="${g.aba}">Resolver</button>`}</div>`).join("")}</div>
-    <div class="dica" style="margin-top:14px">Ordem sugerida: Negócio → Agenda → IA → WhatsApp (testar e inscrever webhook) → Avisos → Cobrança, se algum serviço cobrar antes. Por último, ligue o <b>envio real</b> na aba WhatsApp.</div>
+    <h4>Configuração</h4>
+    <div class="linha"><span class="chip ${obrigOk === obrig.length ? "ok" : "warn"}">Obrigatórios ${obrigOk}/${obrig.length}</span>
+      <button class="btn mini" data-ir="config">Abrir configuração inicial</button></div>
     <h4>Situação</h4>
     <div class="linha">
       <span class="chip ${n.bot_ativo ? "ok" : "bad"}">bot ${n.bot_ativo ? "ligado" : "desligado"}</span>
@@ -460,6 +464,104 @@ function abaVisao(alvo) {
   $$("[data-ir]", alvo).forEach((b) => b.onclick = () => $(`[data-sub="${b.dataset.ir}"]`).click());
 }
 
+
+// --- Configuração inicial ----------------------------------------------
+const faltamObrig = () => (atual?.checklist ?? []).filter((x) => x.nivel === "obrigatorio" && !x.ok);
+const NIVEIS = [["obrigatorio", "Obrigatório", "Sem isto o cliente não pode ir ao ar."], ["recomendado", "Recomendado", "Evita faltas e retrabalho da equipe."],
+  ["opcional", "Opcional", "Deixa o atendimento mais completo."], ["no_ar", "Colocar no ar", "Por último, depois dos obrigatórios."]];
+// Passo a passo do que se faz fora do painel (Meta, Google). Chave = id do item do checklist.
+function guias() {
+  const email = plataforma?.google_email ?? "o e-mail da conta de serviço (aba Agenda)";
+  const url = plataforma?.webhook_url ?? "a URL do webhook (aba WhatsApp)";
+  const modelo = (nome, corpo, extra = "") => [`WhatsApp Manager → <i>Modelos de mensagem</i> → <b>Criar</b>: categoria <b>Utilidade</b>, idioma <b>Português (BR)</b>, nome <span class="mono">${nome}</span>.`,
+    `Corpo: <span class="mono">${corpo}</span>${extra}`, "Envie para análise. Quando a Meta aprovar, clique em <b>Conferir tudo</b> aqui em cima: o item é marcado sozinho."];
+  return {
+    negocio_dados: ["Na aba <b>Negócio</b>, confira o nome e preencha o endereço completo (o bot informa aos pacientes)."],
+    profissional: ["Na aba <b>Agenda</b>, cadastre quem atende e deixe ativo."],
+    horarios: ["Na aba <b>Agenda</b>, preencha os horários de cada profissional por dia (ex.: <span class=\"mono\">08:00-12:00, 13:00-18:00</span>)."],
+    servicos: ["Na aba <b>Agenda</b>, cadastre os serviços com duração e preço e marque quem faz cada um."],
+    ia: ["Sem nada a fazer se usar a IA da plataforma. Para IA própria: aba <b>IA</b> → provedor, chave e <b>Testar</b>."],
+    wa_ids: ["Acesse <b>business.facebook.com</b> com a conta do cliente → <i>Configurações do negócio</i> → <i>Contas do WhatsApp</i>.",
+      "Abra o <b>WhatsApp Manager</b> → <i>Números de telefone</i>: copie o <b>Phone number ID</b> (só números).",
+      "Na mesma tela (ou em <i>Configurações da conta</i>), copie o <b>WhatsApp Business Account ID</b> (WABA).",
+      "Cole os dois na aba <b>WhatsApp</b> e salve. O número e a conta são sempre do cliente."],
+    wa_token: ["Em <i>Configurações do negócio</i> → <i>Usuários</i> → <i>Usuários do sistema</i>, crie (ou use) um usuário do sistema <b>Admin</b>.",
+      "Em <i>Atribuir ativos</i>, dê a ele o app da plataforma e a conta do WhatsApp do cliente (controle total).",
+      "Clique em <b>Gerar novo token</b>, escolha o app, validade <b>Nunca</b> (token permanente) e as permissões <span class=\"mono\">whatsapp_business_messaging</span> e <span class=\"mono\">whatsapp_business_management</span>.",
+      "Cole o token no campo da aba <b>WhatsApp</b> e clique em <b>Salvar no cofre</b>. Ele não aparece de novo, nem para você."],
+    wa_conexao: ["Na aba <b>WhatsApp</b>, clique em <b>Testar conexão</b> (ou <b>Conferir tudo</b> aqui). Deve aparecer o número e o nome verificado."],
+    wa_webhook: [`No app da plataforma (developers.facebook.com) → <i>WhatsApp</i> → <i>Configuração</i>: URL de retorno <span class="mono">${esc(url)}</span> e o token de verificação da plataforma.`,
+      "Assine os campos <span class=\"mono\">messages</span> e, se a equipe usa o app no celular, <span class=\"mono\">smb_message_echoes</span>.",
+      "Volte à aba <b>WhatsApp</b> e clique em <b>Inscrever webhook</b> (liga o número do cliente ao app)."],
+    equipe_whatsapp: ["Na aba <b>Avisos</b>, coloque o WhatsApp de quem atende (com DDI e DDD). É para lá que vai o aviso quando o bot chama a equipe."],
+    modelo_aviso_equipe: modelo("aviso_equipe", "Atendimento necessário: {{1}} ({{2}}) precisa falar com a equipe. Motivo: {{3}}. Responda pelo WhatsApp Business."),
+    cobranca: ["Só vale se algum serviço cobra antes. Na aba <b>Cobrança</b>, salve a chave da API do Asaas do cliente."],
+    google_agenda: [`No Google Agenda do profissional → <i>Configurações e compartilhamento</i> → <i>Compartilhar com pessoas específicas</i>: adicione <span class="mono">${esc(email)}</span> com <b>Fazer alterações nos eventos</b>.`,
+      "Na mesma página, em <i>Integrar agenda</i>, copie o <b>ID da agenda</b>.",
+      "Cole o ID na aba <b>Agenda</b> (Google Agenda do profissional), salve e clique em <b>Testar</b>. Repita para cada profissional."],
+    modelo_cancelamento: modelo("aviso_cancelamento", "Olá, {{1}}! Seu horário de {{2}} em {{3}} foi cancelado por {{4}}. Para remarcar, é só responder esta mensagem."),
+    lembrete: modelo("lembrete_consulta", "Olá, {{1}}! Lembrete: seu horário de {{2}} é {{3}} em {{4}}. Pode confirmar?",
+      ". Botões de resposta rápida, nesta ordem: <b>Confirmar</b> e <b>Remarcar</b>. Depois de aprovado, ligue o lembrete na aba <b>Avisos</b>."),
+    faq_regras: ["Na aba <b>Negócio</b>, preencha as perguntas frequentes (convênio, estacionamento, formas de pagamento) e regras próprias."],
+    bot_ligado: ["Na aba <b>Negócio</b>, deixe o bot ligado."],
+    envio_real: ["Com todos os obrigatórios prontos, na aba <b>WhatsApp</b> escolha <b>WhatsApp real</b> e salve. Faça um teste mandando mensagem para o número."],
+  };
+}
+function abaConfig(alvo) {
+  const ck = atual.checklist, g = guias();
+  const obrig = ck.filter((x) => x.nivel === "obrigatorio"), obrigOk = obrig.filter((x) => x.ok).length;
+  alvo.innerHTML = `
+    <div class="linha entre">
+      <div class="linha"><span class="chip ${obrigOk === obrig.length ? "ok" : "warn"}">Obrigatórios ${obrigOk}/${obrig.length}</span>
+        ${obrigOk === obrig.length && atual.negocio.config.envio !== "whatsapp" ? '<span class="chip ok">pronto para ir ao ar</span>' : ""}</div>
+      <button class="btn prim" id="cfg-conferir">Conferir tudo</button>
+    </div>
+    <div id="cfg-res" class="peq" style="margin-top:8px"></div>
+    ${NIVEIS.map(([nv, titulo, ajuda]) => {
+      const itens = ck.filter((x) => x.nivel === nv);
+      if (!itens.length) return "";
+      return `<h4>${titulo} <span class="muted peq">· ${itens.filter((x) => x.ok).length}/${itens.length} · ${ajuda}</span></h4>
+      <div>${itens.map((x) => `<div class="check-item" data-item="${esc(x.id)}" style="flex-wrap:wrap"><span class="ic">${x.ok ? "✅" : "⬜"}</span>
+        <span style="flex:1">${esc(x.item)}${x.detalhe ? ` <span class="muted peq">· ${esc(x.detalhe)}</span>` : ""}</span>
+        ${x.ok ? "" : `<button class="btn mini" data-ir="${esc(x.aba)}">Resolver</button>`}
+        ${g[x.id] ? `<details style="flex-basis:100%;margin-left:32px"><summary class="peq">Como fazer</summary><ol class="passos peq">${g[x.id].map((p) => `<li>${p}</li>`).join("")}</ol></details>` : ""}
+      </div>`).join("")}</div>`;
+    }).join("")}`;
+  $$("[data-ir]", alvo).forEach((b) => b.onclick = () => $(`[data-sub="${b.dataset.ir}"]`).click());
+  $("#cfg-conferir").onclick = () => conferirTudo();
+}
+// Roda as conferências automáticas que fazem sentido para este cliente e mostra uma linha por resultado.
+async function conferirTudo() {
+  const n = atual.negocio, res = $("#cfg-res"), linhas = [];
+  const mostrar = () => res.innerHTML = linhas.map((l) => `<div>${l}</div>`).join("");
+  const tem = atual.segredos?.wa_token;
+  $("#cfg-conferir").disabled = true;
+  try {
+    if (/^[0-9]+$/.test(n.wa_phone_number_id ?? "") && tem) {
+      linhas.push("WhatsApp: consultando…"); mostrar();
+      const j = await acaoServidor("testar_whatsapp", n.id).catch((e) => ({ ok: false, erro: e.message }));
+      linhas[linhas.length - 1] = j.ok ? `✅ WhatsApp: ${esc(j.info?.numero ?? "")} ${esc(j.info?.nome ?? "")}` : `⬜ WhatsApp: ${esc(j.erro)}`;
+    } else linhas.push("⬜ WhatsApp: preencha o Phone number ID e salve o token para testar.");
+    mostrar();
+    if (n.wa_waba_id && tem) {
+      linhas.push("Modelos: consultando a Meta…"); mostrar();
+      const j = await acaoServidor("conferir_modelos", n.id).catch((e) => ({ ok: false, erro: e.message }));
+      linhas[linhas.length - 1] = j.ok ? j.modelos.map((m) => `${m.aprovado ? "✅" : "⬜"} Modelo ${esc(m.nome)}: ${esc(m.status)}`).join("<br>") : `⬜ Modelos: ${esc(j.erro)}`;
+    } else linhas.push("⬜ Modelos: preencha o WABA e salve o token para conferir.");
+    mostrar();
+    const profs = atual.profissionais.filter((p) => p.ativo && p.gcal_calendar_id);
+    if (plataforma?.google_configurado) {
+      for (const p of profs) {
+        const j = await acaoServidor("testar_google", n.id, { resource_id: p.id }).catch((e) => ({ ok: false, erro: e.message }));
+        linhas.push(j.ok ? `✅ Google Agenda de ${esc(p.nome)}` : `⬜ Google Agenda de ${esc(p.nome)}: ${esc(j.erro)}`); mostrar();
+      }
+      if (!profs.length) { linhas.push("⬜ Google Agenda: nenhum profissional com agenda salva."); mostrar(); }
+    }
+    const texto = res.innerHTML;
+    await recarregar();
+    if ($("#cfg-res")) $("#cfg-res").innerHTML = texto;
+  } finally { if ($("#cfg-conferir")) $("#cfg-conferir").disabled = false; }
+}
 
 // --- Assinatura -------------------------------------------------------
 async function abaAssinatura(alvo) {
@@ -929,9 +1031,10 @@ function abaWhatsApp(alvo) {
       · Assinatura (App Secret): ${plataforma ? (plataforma.app_secret_configurado ? '<span class="chip ok">configurado</span>' : '<span class="chip bad">falta WA_APP_SECRET</span>') : "—"}
       <br>Esses dois ficam nos segredos da Edge Function (Supabase → Edge Functions → Secrets), não por cliente.</div>
     <h4>Envio das respostas</h4>
-    <div class="linha"><select id="w-envio" style="max-width:320px">${opt("simulado", c.envio ?? "simulado", "Simulação (grava, mas não envia)")}${opt("whatsapp", c.envio, "WhatsApp real")}</select>
+    <div class="linha"><select id="w-envio" style="max-width:320px">${opt("simulado", c.envio ?? "simulado", "Simulação (grava, mas não envia)")}${opt("whatsapp", c.envio, "WhatsApp real").replace("<option", faltamObrig().length && c.envio !== "whatsapp" ? "<option disabled" : "<option")}</select>
       <button class="btn prim" id="w-salvar-envio">Salvar</button></div>
-    <div id="w-envio-aviso"></div>`;
+    <div id="w-envio-aviso">${faltamObrig().length && c.envio !== "whatsapp" ? `<div class="aviso" style="margin-top:8px">Para ligar o envio real, termine os obrigatórios: ${faltamObrig().map((x) => esc(x.item)).join("; ")}. <a href="#" data-ir="config">Ver configuração inicial</a></div>` : ""}</div>`;
+  $$("[data-ir]", alvo).forEach((b) => b.onclick = (e) => { e.preventDefault(); $(`[data-sub="${b.dataset.ir}"]`).click(); });
   ligarSegredos(alvo);
   $("#w-copiar").onclick = () => copiar(urlHook);
   $("#w-salvar-atend").onclick = () => salvarNegocio({ config: { atendimento_humano: $("#w-atend").value } }, "Modo de atendimento salvo");
@@ -952,11 +1055,6 @@ function abaWhatsApp(alvo) {
   $("#w-inscrever").onclick = executar("inscrever_webhook", "Webhook inscrito");
   $("#w-salvar-envio").onclick = () => {
     const v = $("#w-envio").value;
-    const faltam = atual.checklist.filter((x) => !x.ok && x.aba !== "cobranca" && !/Envio real/.test(x.item));
-    if (v === "whatsapp" && faltam.length && $("#w-salvar-envio").dataset.conf !== "1") {
-      $("#w-envio-aviso").innerHTML = `<div class="aviso" style="margin-top:8px">Ainda faltam: ${faltam.map((x) => esc(x.item)).join("; ")}. Clique em Salvar de novo para ligar mesmo assim.</div>`;
-      $("#w-salvar-envio").dataset.conf = "1"; return;
-    }
     salvarNegocio({ config: { envio: v } }, v === "whatsapp" ? "Envio real ligado" : "Em simulação");
   };
 }
