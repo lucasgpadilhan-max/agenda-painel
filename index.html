@@ -735,10 +735,11 @@ function abaAgenda(alvo) {
       c.innerHTML = p.erro ? `<span class="chip bad" title="${esc(p.erro)}">erro</span> ${esc(p.erro)}`
         : p.ultimo_sync ? `<span class="chip ok">ok</span> ${data(p.ultimo_sync)}` : '<span class="chip warn">aguardando sincronizar</span>';
     }
-    $("#gcal-reservas").innerHTML = r.reservas.length ? `<table><thead><tr><th>Quando</th><th>Paciente</th><th>Serviço</th><th>Profissional</th><th>Google</th></tr></thead><tbody>
+    $("#gcal-reservas").innerHTML = r.reservas.length ? `<table><thead><tr><th>Quando</th><th>Paciente</th><th>Serviço</th><th>Profissional</th><th>Google</th><th>Lembrete</th></tr></thead><tbody>
       ${r.reservas.map((x) => `<tr><td>${esc(x.inicio_local.slice(8, 10) + "/" + x.inicio_local.slice(5, 7) + " " + x.inicio_local.slice(11))}</td><td>${esc(x.paciente)}</td>
         <td>${esc(x.servico)}</td><td>${esc(x.profissional ?? "")}</td>
-        <td>${x.no_google ? '<span class="chip ok">no Google</span>' : x.pendente ? '<span class="chip warn" title="O Google estava fora do ar; a rotina tenta de novo">pendente</span>' : '<span class="chip">só interna</span>'}</td></tr>`).join("")}
+        <td>${x.no_google ? '<span class="chip ok">no Google</span>' : x.pendente ? '<span class="chip warn" title="O Google estava fora do ar; a rotina tenta de novo">pendente</span>' : '<span class="chip">só interna</span>'}</td>
+        <td>${x.confirmado ? '<span class="chip ok">confirmado</span>' : x.lembrete_enviado ? '<span class="chip warn">lembrete enviado</span>' : ""}</td></tr>`).join("")}
       </tbody></table><p class="muted peq">${r.bloqueios_google} horário(s) ocupado(s) vindos do Google.</p>` : '<p class="muted peq">Nenhuma reserva futura.</p>';
   }).catch((e) => erroEm($("#gcal-reservas"), e));
 }
@@ -980,13 +981,37 @@ function abaAvisos(alvo) {
       <ol class="passos peq"><li>WhatsApp Manager → <i>Modelos de mensagem</i> → Criar → categoria <b>Utilidade</b>, idioma <b>Português (BR)</b>, nome <span class="mono">aviso_cancelamento</span>.</li>
       <li>Corpo (4 variáveis, nesta ordem: nome, serviço, quando, negócio): <span class="mono">Olá, {{1}}! Seu horário de {{2}} em {{3}} foi cancelado por {{4}}. Para remarcar, é só responder esta mensagem.</span></li>
       <li>Quando aprovado, marque a caixa acima.</li></ol></details>
+    <h4>Lembrete da consulta (véspera)</h4>
+    <p class="muted peq">O paciente recebe um lembrete antes da consulta com os botões <b>Confirmar</b> e <b>Remarcar</b>. Confirmar marca a reserva como confirmada;
+      Remarcar continua com o bot. Quem não confirmar aparece em <b>Conversas</b> como aguardando, para a equipe ligar.
+      Como a janela de 24 h costuma estar fechada, o lembrete usa o modelo <span class="mono">lembrete_consulta</span>: a Meta cobra do dono do número (o cliente) cerca de R$ 0,035 por lembrete.</p>
+    <label class="linha" style="color:var(--ink);font-weight:400"><input type="checkbox" id="a-lemb-ativo" ${c.lembrete_ativo ? "checked" : ""}> Enviar lembrete antes das consultas</label>
+    <label class="linha" style="color:var(--ink);font-weight:400"><input type="checkbox" id="a-tpl-lemb" ${c.template_lembrete_aprovado ? "checked" : ""}> O modelo <b>lembrete_consulta</b> já foi aprovado na Meta para este número</label>
+    <div class="grade" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:6px">
+      <div><label>Horas antes da consulta</label><input id="a-lemb-horas" type="number" min="2" max="72" value="${Number(c.lembrete_horas_antes ?? 24)}"></div>
+      <div><label>Enviar a partir das (h)</label><input id="a-lemb-ini" type="number" min="0" max="23" value="${Number(c.lembrete_janela_inicio ?? 8)}"></div>
+      <div><label>Enviar até as (h)</label><input id="a-lemb-fim" type="number" min="1" max="24" value="${Number(c.lembrete_janela_fim ?? 20)}"></div>
+      <div><label>Avisar a equipe quantas horas antes, se não confirmar</label><input id="a-lemb-alerta" type="number" min="1" max="24" value="${Number(c.alerta_sem_confirmacao_horas ?? 3)}"></div>
+    </div>
+    <details style="margin-top:8px"><summary class="peq">Como criar o modelo na Meta</summary>
+      <ol class="passos peq"><li>WhatsApp Manager → <i>Modelos de mensagem</i> → Criar → categoria <b>Utilidade</b>, idioma <b>Português (BR)</b>, nome <span class="mono">lembrete_consulta</span>.</li>
+      <li>Corpo (4 variáveis: nome, serviço, quando, negócio): <span class="mono">Olá, {{1}}! Lembrete: seu horário de {{2}} é {{3}} em {{4}}. Pode confirmar?</span></li>
+      <li>Botões → <b>Resposta rápida</b>, nesta ordem: <span class="mono">Confirmar</span> e <span class="mono">Remarcar</span>.</li>
+      <li>Quando aprovado, marque a caixa acima.</li></ol></details>
     <div class="linha" style="margin-top:14px"><button class="btn prim" id="a-salvar">Salvar</button></div>`;
   $("#a-salvar").onclick = () => {
     const nums = $("#a-num").value.split(",").map((x) => x.replace(/\D/g, "")).filter(Boolean);
     const ruins = nums.filter((x) => x.length < 12 || x.length > 13);
     if (ruins.length) return toast("Número com formato estranho: " + ruins.join(", ") + " (use 55 + DDD + número)");
     if (nums.length > 5) return toast("No máximo 5 números.");
-    salvarNegocio({ config: { aviso_equipe_whatsapp: nums, template_aviso_aprovado: $("#a-tpl").checked, template_cancelamento_aprovado: $("#a-tpl-cancel").checked } });
+    const n = (sel) => Math.round(Number($(sel).value));
+    const lemb = { horas: n("#a-lemb-horas"), ini: n("#a-lemb-ini"), fim: n("#a-lemb-fim"), alerta: n("#a-lemb-alerta") };
+    if (!(lemb.horas >= 2 && lemb.horas <= 72)) return toast("Horas antes da consulta: entre 2 e 72.");
+    if (!(lemb.ini >= 0 && lemb.fim <= 24 && lemb.ini < lemb.fim)) return toast("Horário de envio inválido: o início precisa ser antes do fim (0 a 24).");
+    if (!(lemb.alerta >= 1 && lemb.alerta < lemb.horas)) return toast("O aviso à equipe precisa ser entre 1 h e menos que as horas do lembrete.");
+    salvarNegocio({ config: { aviso_equipe_whatsapp: nums, template_aviso_aprovado: $("#a-tpl").checked, template_cancelamento_aprovado: $("#a-tpl-cancel").checked,
+      lembrete_ativo: $("#a-lemb-ativo").checked, template_lembrete_aprovado: $("#a-tpl-lemb").checked,
+      lembrete_horas_antes: lemb.horas, lembrete_janela_inicio: lemb.ini, lembrete_janela_fim: lemb.fim, alerta_sem_confirmacao_horas: lemb.alerta } });
   };
 }
 
