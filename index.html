@@ -78,6 +78,13 @@
   .oculto { display: none !important; }
   details > summary { cursor: pointer; }
   .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  .conversas { display: grid; grid-template-columns: 260px 1fr; gap: 12px; } @media (max-width: 800px) { .conversas { grid-template-columns: 1fr; } }
+  .item-conv { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line, #e3e6eb); border-radius: 8px; background: #fff; margin-bottom: 6px; cursor: pointer; }
+  .item-conv.ativo { border-color: var(--info); background: #f3f8fe; }
+  .msgs { max-height: 420px; overflow-y: auto; padding: 8px; background: #f7f8fa; border-radius: 8px; }
+  .balao { max-width: 80%; margin: 6px 0; padding: 6px 10px; border-radius: 10px; font-size: 13px; white-space: pre-wrap; }
+  .balao.in { background: #fff; border: 1px solid #e3e6eb; } .balao.out { background: #e3f4ea; margin-left: auto; }
+  .balao.out.equipe { background: #e6effa; } .balao .quem { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
   .copiar { display: flex; gap: 6px; } .copiar input { font-family: var(--mono); font-size: 12px; background: #f7f8fa; }
   .hor-linha { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: center; margin: 4px 0; }
   .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -108,7 +115,7 @@
       <button data-aba="segmentos">Segmentos</button>
       <button data-aba="auditoria">Auditoria</button>
     </nav>
-    <div class="direita"><span id="quem"></span><button class="btn" id="sair">Sair</button></div>
+    <div class="direita"><button id="cont-aguardando" class="btn oculto" title="Conversas esperando a equipe"></button><span id="quem"></span><button class="btn" id="sair">Sair</button></div>
   </header>
   <main>
     <section id="aba-clientes">
@@ -181,11 +188,12 @@ const PROVEDORES = {
   gemini: { nome: "Google Gemini", modelos: ["gemini-3.5-flash-lite", "gemini-3.5-flash"], site: "https://aistudio.google.com/apikey" },
   openai: { nome: "OpenAI", modelos: ["gpt-5-mini", "gpt-5"], site: "https://platform.openai.com/api-keys" },
 };
-const ABAS_NEG = [["visao", "Visão geral"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
+const ABAS_NEG = [["visao", "Visão geral"], ["conversas", "Conversas"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
   ["avisos", "Avisos"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
 
 let segmentos = [];
 let negocios = [], verticais = [], plataforma = null, atual = null, abaNeg = "visao", timerQA = null, filtroErros = "aberto";
+let timerConversas = null, conversaAberta = null;
 
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 4000); }
 async function rpc(fn, args = {}) {
@@ -194,13 +202,13 @@ async function rpc(fn, args = {}) {
   return d;
 }
 // Ações que usam segredos rodam no servidor (rota /admin). O painel só recebe o resultado.
-async function acaoServidor(acao, business_id) {
+async function acaoServidor(acao, business_id, extra = {}) {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) throw new Error("Sessão expirada: entre de novo.");
   const r = await fetch(URL_FUNCAO + "/admin", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer " + session.access_token },
-    body: JSON.stringify({ acao, business_id }),
+    body: JSON.stringify({ ...extra, acao, business_id }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.erro || "A função respondeu " + r.status);
@@ -217,6 +225,8 @@ function traduzErro(m) {
   if (/EXCLUIR_QA_PROIBIDO/.test(m)) return "O negócio de teste não pode ser excluído.";
   if (/PLANO_INCOMPLETO/.test(m)) return "Preencha valor e dia do vencimento.";
   if (/DIA_INVALIDO/.test(m)) return "Dia do vencimento entre 1 e 28.";
+  if (/AGENDA_INVALIDA/.test(m)) return "ID da agenda inválido: no Google Agenda, abra Configurações da agenda → Integrar agenda e copie o ID (parece um e-mail).";
+  if (/CONVERSA_NAO_ENCONTRADA/.test(m)) return "Conversa não encontrada.";
   if (/HORARIO_INVALIDO/.test(m)) return "Horário inválido: o fim precisa ser depois do início (formato 08:00-12:00).";
   return m;
 }
@@ -276,12 +286,18 @@ async function carregarClientes() {
         ${n.qa ? '<span class="chip">teste</span>' : n.envio === "whatsapp" ? '<span class="chip ok">no ar</span>' : '<span class="chip warn">simulação</span>'}
         ${n.desativado_em ? '<span class="chip bad">desativado</span>' : n.bot_ativo ? "" : '<span class="chip bad">bot off</span>'}
         ${chipPagamento(n.pagamento)}
+        ${n.aguardando ? `<span class="chip warn" title="conversas esperando a equipe">${n.aguardando} aguardando</span>` : ""}
       </div>
       <div class="barra" title="Configuração: ${n.checklist_ok}/${n.checklist_total}"><i style="width:${pct}%"></i></div>
       <div class="muted peq" style="margin-top:3px">Configuração ${n.checklist_ok}/${n.checklist_total} · ${n.msgs_24h} msgs 24h</div>
     </button>`;
   }).join("") || '<p class="muted">Nenhum cliente.</p>';
   $$("[data-neg]").forEach((b) => b.onclick = () => abrirNegocio(b.dataset.neg, "visao"));
+  const total = negocios.reduce((t, n) => t + Number(n.aguardando || 0), 0);
+  const ca = $("#cont-aguardando");
+  ca.innerHTML = `Aguardando atendimento <span class="cont">${total}</span>`;
+  ca.classList.toggle("oculto", !total);
+  ca.onclick = () => { const n = negocios.find((x) => x.aguardando); if (n) { irPara("clientes"); abrirNegocio(n.id, "conversas"); } };
 }
 $("#recarregar").onclick = async () => { await carregarClientes(); if (atual) abrirNegocio(atual.negocio.id, abaNeg); };
 $("#novo").onclick = () => novoCliente();
@@ -339,7 +355,7 @@ async function abrirNegocio(id, aba = abaNeg) {
     ${resumo.pagamento?.situacao === "atrasado" && !resumo.desativado_em ? `<div class="aviso" style="margin-top:10px">Mensalidade atrasada há ${resumo.pagamento.dias_atraso} dia(s) (venceu ${dataCurta(resumo.pagamento.vencimento)}).</div>` : ""}
     <div class="subabas">${ABAS_NEG.map(([k, r]) => {
       const p = atual.checklist.filter((c) => c.aba === k && !c.ok).length;
-      const extra = k === "assinatura" && resumo.pagamento?.situacao === "atrasado" ? '<span class="cont">!</span>' : k === "erros" && resumo.erros_abertos ? `<span class="cont">${resumo.erros_abertos}</span>` : p ? `<span class="cont" style="background:var(--warn)">${p}</span>` : "";
+     const extra = k === "conversas" && resumo.aguardando ? `<span class="cont" style="background:var(--warn)">${resumo.aguardando}</span>` : k === "assinatura" && resumo.pagamento?.situacao === "atrasado" ? '<span class="cont">!</span>' : k === "erros" && resumo.erros_abertos ? `<span class="cont">${resumo.erros_abertos}</span>` : p ? `<span class="cont" style="background:var(--warn)">${p}</span>` : "";
       return `<button data-sub="${k}" class="${k === abaNeg ? "ativo" : ""}">${r}${extra}</button>`;
     }).join("")}</div>
     <div id="conteudo-neg"></div>`;
@@ -350,7 +366,8 @@ async function recarregar() { await carregarClientes(); await abrirNegocio(atual
 
 function desenharAba() {
   const alvo = $("#conteudo-neg");
-  const fn = { visao: abaVisao, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
+  clearInterval(timerConversas); timerConversas = null;
+  const fn = { visao: abaVisao, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
   alvo.innerHTML = ""; fn(alvo);
 }
 
@@ -621,8 +638,26 @@ function abaGeral(alvo) {
 function abaAgenda(alvo) {
   const profs = atual.profissionais, servs = atual.servicos;
   const nomeProf = (id) => profs.find((p) => p.id === id)?.nome ?? "?";
+  const email = plataforma?.google_email;
   alvo.innerHTML = `
-    <h4 style="margin-top:0">Profissionais</h4>
+    <h4 style="margin-top:0">Google Agenda</h4>
+    ${email ? `<p class="muted peq">Cada profissional pode ter uma agenda do Google. Compartilhe a agenda com o e-mail abaixo usando
+        <b>"Fazer alterações nos eventos"</b> e cole o ID da agenda (Configurações da agenda → Integrar agenda). O bot só marca em horário livre no Google
+        e cria o evento na hora; eventos apagados no Google cancelam a reserva e o paciente é avisado.</p>
+      <div class="copiar"><input readonly value="${esc(email)}"><button class="btn mini" id="gcal-copiar">Copiar</button></div>`
+    : '<div class="aviso">A conta de serviço do Google não está configurada na função (segredo <span class="mono">GOOGLE_SA_JSON</span>). Sem ela, vale só a agenda interna.</div>'}
+    <table style="margin-top:8px"><thead><tr><th>Profissional</th><th>ID da agenda do Google</th><th>Situação</th><th></th></tr></thead><tbody id="gcal-profs">
+      ${profs.filter((p) => p.ativo).map((p) => `<tr><td>${esc(p.nome)}</td>
+        <td><input data-gcal-cal="${p.id}" value="${esc(p.gcal_calendar_id ?? "")}" placeholder="agenda@group.calendar.google.com"></td>
+        <td class="peq" data-gcal-sit="${p.id}">${p.gcal_calendar_id ? "…" : '<span class="chip">sem agenda</span>'}</td>
+        <td class="linha"><button class="btn mini" data-gcal-salvar="${p.id}">Salvar</button>${p.gcal_calendar_id ? `<button class="btn mini" data-gcal-testar="${p.id}">Testar</button>` : ""}</td></tr>`).join("")}
+    </tbody></table>
+    <div class="linha" style="margin-top:8px">${email ? '<button class="btn mini" id="gcal-sync">Sincronizar agora</button>' : ""}<span class="muted peq">A sincronização roda sozinha a cada 5 minutos.</span></div>
+    <div id="gcal-res" style="margin-top:8px"></div>
+    <h4>Próximas reservas</h4>
+    <div id="gcal-reservas"><p class="muted peq">Carregando…</p></div>
+
+    <h4>Profissionais</h4>
     <table><thead><tr><th>Nome</th><th>Situação</th><th></th></tr></thead><tbody>
       ${profs.map((p) => `<tr><td><input value="${esc(p.nome)}" id="pf-${p.id}"></td>
         <td><select id="pa-${p.id}">${opt("true", p.ativo, "Ativo")}${opt("false", p.ativo, "Inativo")}</select></td>
@@ -667,6 +702,45 @@ function abaAgenda(alvo) {
     } catch (e) { toast(e.message); }
   });
   $$("[data-editar-serv]", alvo).forEach((b) => b.onclick = () => formServico(servs.find((s) => s.id === b.dataset.editarServ)));
+
+  // Google Agenda
+  if ($("#gcal-copiar")) $("#gcal-copiar").onclick = () => copiar(email);
+  const res = $("#gcal-res");
+  $$("[data-gcal-salvar]", alvo).forEach((b) => b.onclick = async () => {
+    const rid = b.dataset.gcalSalvar;
+    try {
+      await rpc("admin_salvar_agenda_google", { p_business_id: atual.negocio.id, p_resource_id: rid, p_calendar_id: $(`[data-gcal-cal="${rid}"]`).value.trim() });
+      toast("Agenda salva. Clique em Testar."); recarregar();
+    } catch (e) { toast(e.message); }
+  });
+  $$("[data-gcal-testar]", alvo).forEach((b) => b.onclick = async () => {
+    res.innerHTML = '<span class="muted">Consultando o Google…</span>';
+    try {
+      const j = await acaoServidor("testar_google", atual.negocio.id, { resource_id: b.dataset.gcalTestar });
+      res.innerHTML = j.ok ? `<div class="dica">✅ Agenda <b>${esc(j.nome)}</b> conectada com permissão de editar.</div>` : `<div class="erro-msg">${esc(j.erro)}</div>`;
+    } catch (e) { erroEm(res, e); }
+  });
+  if ($("#gcal-sync")) $("#gcal-sync").onclick = async () => {
+    res.innerHTML = '<span class="muted">Sincronizando…</span>';
+    try {
+      const j = await acaoServidor("sincronizar_google", atual.negocio.id);
+      if (!j.ok) return res.innerHTML = `<div class="erro-msg">${esc(j.erro)}</div>`;
+      const r = j.resumo;
+      res.innerHTML = `<div class="dica">Sincronizado: ${r.profissionais} agenda(s), ${r.bloqueios} horário(s) ocupado(s) no Google, ${r.reenviadas} reenviada(s), ${r.canceladas} cancelada(s)${r.erros ? `, <b>${r.erros} erro(s)</b> (veja a aba Erros)` : ""}.</div>`;
+    } catch (e) { erroEm(res, e); }
+  };
+  rpc("admin_agenda_resumo", { p_business_id: atual.negocio.id }).then((r) => {
+    for (const p of r.profissionais) {
+      const c = $(`[data-gcal-sit="${p.id}"]`, alvo); if (!c || !p.calendar_id) continue;
+      c.innerHTML = p.erro ? `<span class="chip bad" title="${esc(p.erro)}">erro</span> ${esc(p.erro)}`
+        : p.ultimo_sync ? `<span class="chip ok">ok</span> ${data(p.ultimo_sync)}` : '<span class="chip warn">aguardando sincronizar</span>';
+    }
+    $("#gcal-reservas").innerHTML = r.reservas.length ? `<table><thead><tr><th>Quando</th><th>Paciente</th><th>Serviço</th><th>Profissional</th><th>Google</th></tr></thead><tbody>
+      ${r.reservas.map((x) => `<tr><td>${esc(x.inicio_local.slice(8, 10) + "/" + x.inicio_local.slice(5, 7) + " " + x.inicio_local.slice(11))}</td><td>${esc(x.paciente)}</td>
+        <td>${esc(x.servico)}</td><td>${esc(x.profissional ?? "")}</td>
+        <td>${x.no_google ? '<span class="chip ok">no Google</span>' : x.pendente ? '<span class="chip warn" title="O Google estava fora do ar; a rotina tenta de novo">pendente</span>' : '<span class="chip">só interna</span>'}</td></tr>`).join("")}
+      </tbody></table><p class="muted peq">${r.bloqueios_google} horário(s) ocupado(s) vindos do Google.</p>` : '<p class="muted peq">Nenhuma reserva futura.</p>';
+  }).catch((e) => erroEm($("#gcal-reservas"), e));
 }
 function formServico(s) {
   const f = $("#form-serv"), p = s?.policies ?? {};
@@ -700,6 +774,74 @@ function formServico(s) {
       toast("Serviço salvo"); recarregar();
     } catch (e) { toast(e.message); }
   };
+}
+
+// --- Conversas (atendimento humano) -----------------------------------
+const AUTOR = { paciente: "Paciente", bot: "Bot", admin_painel: "Equipe (painel)", equipe_app: "Equipe (app)", sistema: "Sistema" };
+function abaConversas(alvo) {
+  const n = atual.negocio, modoApp = n.config?.atendimento_humano === "app";
+  alvo.innerHTML = `
+    <div class="dica">${modoApp
+      ? "Modo <b>app WhatsApp Business</b> (coexistência): a equipe responde pelo celular; as respostas aparecem aqui e pausam o bot por 24 h."
+      : "Modo <b>painel</b>: a equipe responde por aqui. Ao assumir, o bot fica pausado por 24 h nessa conversa."}
+      A lista se atualiza sozinha a cada 20 s.</div>
+    <div class="conversas" style="margin-top:10px">
+      <div id="cv-lista"><p class="muted">Carregando…</p></div>
+      <div id="cv-conversa" class="card"><p class="muted">Escolha uma conversa.</p></div>
+    </div>`;
+  let lista = [];
+  const desenharLista = async () => {
+    try { lista = await rpc("admin_conversas", { p_business_id: n.id, p_limite: 100 }); } catch (e) { return erroEm($("#cv-lista"), e); }
+    $("#cv-lista").innerHTML = lista.map((c) => `<button class="item-conv ${conversaAberta === c.id ? "ativo" : ""}" data-conv="${c.id}">
+        <div class="linha entre"><b>${esc(c.paciente || c.telefone)}</b>${c.aguardando ? '<span class="chip warn">aguardando</span>' : ""}</div>
+        <div class="muted peq">${esc(c.ultima_msg ?? "")}</div>
+        <div class="muted peq">${c.ultima_em ? data(c.ultima_em) : ""}${c.bot_pausado ? " · bot pausado" : ""}</div></button>`).join("")
+      || '<p class="muted peq">Nenhuma conversa ainda.</p>';
+    $$("[data-conv]", alvo).forEach((b) => b.onclick = () => abrir(b.dataset.conv));
+  };
+  const abrir = async (id) => {
+    conversaAberta = id;
+    $$("[data-conv]", alvo).forEach((b) => b.classList.toggle("ativo", b.dataset.conv === id));
+    const c = lista.find((x) => x.id === id); if (!c) return;
+    const box = $("#cv-conversa");
+    let msgs = [];
+    try { msgs = await rpc("admin_mensagens", { p_business_id: n.id, p_conversation_id: id, p_limite: 200 }); } catch (e) { return erroEm(box, e); }
+    const envio = modoApp
+      ? '<div class="aviso">Este cliente responde pelo <b>app WhatsApp Business</b> no celular. As mensagens da equipe aparecem aqui sozinhas.</div>'
+      : `<textarea id="cv-texto" rows="3" placeholder="${c.janela_aberta ? "Escreva a resposta para o paciente" : "Janela de 24 h fechada"}" ${c.janela_aberta ? "" : "disabled"}></textarea>
+         <div class="linha" style="margin-top:6px"><button class="btn prim" id="cv-enviar" ${c.janela_aberta ? "" : "disabled"}>Enviar</button>
+         ${c.janela_aberta ? "" : '<span class="muted peq">O WhatsApp só deixa responder até 24 h depois da última mensagem do paciente. Ligue para ele ou espere ele escrever.</span>'}</div>`;
+    box.innerHTML = `
+      <div class="linha entre"><div><b>${esc(c.paciente || "Sem nome")}</b> <span class="mono peq">${esc(c.telefone)}</span></div>
+        <div class="linha">${c.bot_pausado ? '<button class="btn mini" id="cv-devolver">Devolver ao bot</button>' : '<button class="btn mini" id="cv-assumir">Assumir (pausar bot 24 h)</button>'}</div></div>
+      ${c.avisar_paciente ? `<div class="aviso" id="cv-avisar" style="margin-top:8px">📣 ${esc(c.avisar_paciente)} <button class="btn mini" id="cv-avisado">Já avisei</button></div>` : ""}
+      <div class="msgs" id="cv-mensagens" style="margin-top:8px">${msgs.map((m) => `<div class="balao ${m.direcao === "in" ? "in" : "out"} ${/admin_painel|equipe_app/.test(m.autor) ? "equipe" : ""}">
+          <span class="quem">${esc(AUTOR[m.autor] ?? m.autor ?? "")} · ${data(m.em)}${m.wa_status === "simulado" ? " · simulado" : ""}</span>${esc(m.texto)}</div>`).join("") || '<p class="muted peq">Sem mensagens.</p>'}</div>
+      <div style="margin-top:8px">${envio}</div>`;
+    const m = $("#cv-mensagens"); m.scrollTop = m.scrollHeight;
+    const depois = async (msg) => { toast(msg); await desenharLista(); await carregarClientes(); await abrir(id); };
+    const acao = (sel, fn, msg) => { const b = $(sel); if (b) b.onclick = async () => { try { await rpc(fn, { p_business_id: n.id, p_conversation_id: id }); await depois(msg); } catch (e) { toast(e.message); } }; };
+    acao("#cv-assumir", "admin_assumir", "Bot pausado por 24 h nesta conversa");
+    acao("#cv-devolver", "admin_devolver_ao_bot", "Conversa devolvida ao bot");
+    acao("#cv-avisado", "admin_avisado", "Marcado como avisado");
+    const enviar = $("#cv-enviar");
+    if (enviar) enviar.onclick = async () => {
+      const texto = $("#cv-texto").value.trim();
+      if (!texto) return toast("Escreva a mensagem.");
+      enviar.disabled = true;
+      try {
+        const j = await acaoServidor("responder", n.id, { conversation_id: id, texto });
+        if (!j.ok) { enviar.disabled = false; return toast(j.erro); }
+        await depois(j.modo === "whatsapp" ? "Enviado pelo WhatsApp" : "Gravado (envio em simulação)");
+      } catch (e) { enviar.disabled = false; toast(e.message); }
+    };
+  };
+  desenharLista().then(() => { if (conversaAberta && lista.some((c) => c.id === conversaAberta)) abrir(conversaAberta); });
+  timerConversas = setInterval(() => {
+    if (!document.body.contains(alvo) || abaNeg !== "conversas") return clearInterval(timerConversas);
+    if (document.activeElement?.id === "cv-texto") return desenharLista(); // não apaga o que está sendo digitado
+    desenharLista().then(() => { if (conversaAberta) abrir(conversaAberta); });
+  }, 20000);
 }
 
 // --- IA ---------------------------------------------------------------
@@ -748,6 +890,17 @@ function abaWhatsApp(alvo) {
   const n = atual.negocio, c = n.config, info = c.whatsapp_info;
   const urlHook = plataforma?.webhook_url ?? URL_FUNCAO;
   alvo.innerHTML = `
+    <div class="aviso">O número e a conta do WhatsApp na Meta são <b>sempre do cliente</b> (portfólio empresarial dele). A plataforma só recebe acesso para operar o bot;
+      se o cliente sair, ele leva o número. Combine isso com o dono do negócio na contratação.</div>
+    <h4>Como a equipe atende quando o bot passa a conversa</h4>
+    <div class="linha"><select id="w-atend" style="max-width:420px">
+      ${opt("painel", c.atendimento_humano ?? "painel", "Pelo painel (número só do bot)")}${opt("app", c.atendimento_humano, "Pelo app WhatsApp Business no celular (coexistência)")}</select>
+      <button class="btn prim" id="w-salvar-atend">Salvar</button></div>
+    <details style="margin-top:6px"><summary class="peq">Como ligar a coexistência (mesmo número no app e no bot)</summary>
+      <ol class="passos peq"><li>O número precisa já estar no app <b>WhatsApp Business</b> do cliente (versão atualizada) e ser conectado pelo <b>cadastro incorporado</b> (Embedded Signup) da Meta, escolhendo "conectar app existente".</li>
+      <li>No app da plataforma, assine também o campo de webhook <span class="mono">smb_message_echoes</span>: é ele que traz para cá as mensagens que a equipe envia pelo celular.</li>
+      <li>Cada resposta da equipe pelo celular pausa o bot por 24 h naquela conversa. Mensagens da equipe não abrem a janela de 24 h.</li></ol></details>
+    <hr class="sep">
     <details ${atual.segredos.wa_token ? "" : "open"}><summary><b>Passo a passo na Meta</b></summary>
       <ol class="passos peq">
         <li>Em <a href="https://business.facebook.com" target="_blank" rel="noopener">business.facebook.com</a>, use (ou crie) o portfólio empresarial do cliente e adicione o número em <i>Contas do WhatsApp</i>.</li>
@@ -780,6 +933,7 @@ function abaWhatsApp(alvo) {
     <div id="w-envio-aviso"></div>`;
   ligarSegredos(alvo);
   $("#w-copiar").onclick = () => copiar(urlHook);
+  $("#w-salvar-atend").onclick = () => salvarNegocio({ config: { atendimento_humano: $("#w-atend").value } }, "Modo de atendimento salvo");
   $("#w-salvar-ids").onclick = () => {
     const d = { wa_waba_id: $("#w-waba").value.trim() };
     if (!n.qa) d.wa_phone_number_id = $("#w-pnid").value.trim();
@@ -818,13 +972,21 @@ function abaAvisos(alvo) {
       <ol class="passos peq"><li>WhatsApp Manager → <i>Modelos de mensagem</i> → Criar → categoria <b>Utilidade</b>, idioma <b>Português (BR)</b>, nome <span class="mono">aviso_equipe</span>.</li>
       <li>Corpo (exatamente 3 variáveis, nesta ordem: nome, telefone, motivo): <span class="mono">Atendimento necessário: {{1}} ({{2}}) precisa falar com a equipe. Motivo: {{3}}. Responda pelo WhatsApp Business.</span></li>
       <li>Envie para análise; quando aprovado, marque a caixa acima.</li></ol></details>
+    <h4>Aviso de cancelamento ao paciente</h4>
+    <p class="muted peq">Quando um evento do bot é apagado no Google Agenda, a reserva é cancelada e o paciente é avisado: dentro da janela de 24 h por mensagem comum (grátis);
+      fora dela, pelo modelo <span class="mono">aviso_cancelamento</span> (a Meta cobra do dono da conta, que é sempre o cliente, alguns centavos por mensagem). Sem o modelo, a conversa aparece em Conversas com "avise o paciente".</p>
+    <label class="linha" style="color:var(--ink);font-weight:400"><input type="checkbox" id="a-tpl-cancel" ${c.template_cancelamento_aprovado ? "checked" : ""}> O modelo <b>aviso_cancelamento</b> já foi aprovado na Meta para este número</label>
+    <details style="margin-top:8px"><summary class="peq">Como criar o modelo na Meta</summary>
+      <ol class="passos peq"><li>WhatsApp Manager → <i>Modelos de mensagem</i> → Criar → categoria <b>Utilidade</b>, idioma <b>Português (BR)</b>, nome <span class="mono">aviso_cancelamento</span>.</li>
+      <li>Corpo (4 variáveis, nesta ordem: nome, serviço, quando, negócio): <span class="mono">Olá, {{1}}! Seu horário de {{2}} em {{3}} foi cancelado por {{4}}. Para remarcar, é só responder esta mensagem.</span></li>
+      <li>Quando aprovado, marque a caixa acima.</li></ol></details>
     <div class="linha" style="margin-top:14px"><button class="btn prim" id="a-salvar">Salvar</button></div>`;
   $("#a-salvar").onclick = () => {
     const nums = $("#a-num").value.split(",").map((x) => x.replace(/\D/g, "")).filter(Boolean);
     const ruins = nums.filter((x) => x.length < 12 || x.length > 13);
     if (ruins.length) return toast("Número com formato estranho: " + ruins.join(", ") + " (use 55 + DDD + número)");
     if (nums.length > 5) return toast("No máximo 5 números.");
-    salvarNegocio({ config: { aviso_equipe_whatsapp: nums, template_aviso_aprovado: $("#a-tpl").checked } });
+    salvarNegocio({ config: { aviso_equipe_whatsapp: nums, template_aviso_aprovado: $("#a-tpl").checked, template_cancelamento_aprovado: $("#a-tpl-cancel").checked } });
   };
 }
 
