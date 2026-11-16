@@ -1146,6 +1146,7 @@ async function listarIncidentes(alvo, businessId, aoMudar, soPlataforma = false)
         <span class="chip ${i.status === "aberto" ? "bad" : i.status === "resolvido" ? "ok" : ""}">${esc(i.status)}</span></div>
       <div style="margin-top:6px">${esc(i.assinatura)}</div>
       <div class="muted peq" style="margin-top:4px">primeira ${data(i.primeiro_em)}${i.nota ? " · nota: " + esc(i.nota) : ""}</div>
+      ${i.suporte_sessao_url ? `<div class="peq" style="margin-top:4px">🤖 <a href="${esc(i.suporte_sessao_url)}" target="_blank" rel="noopener">Abrir sessão de suporte do Claude</a></div>` : ""}
       <details style="margin-top:8px"><summary class="peq">Detalhes</summary><pre>${esc(JSON.stringify(i.exemplo, null, 2))}</pre>
         ${i.ultimo_trace ? `<button class="btn mini" style="margin-top:8px" data-trace="${i.ultimo_trace}">Ver passo a passo da última ocorrência</button><pre class="oculto" id="trace-${i.ultimo_trace}"></pre>` : ""}</details>
       <div class="linha" style="margin-top:10px">
