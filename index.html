@@ -989,22 +989,42 @@ function abaIA(alvo) {
 }
 
 // --- WhatsApp ---------------------------------------------------------
+const URL_CONECTAR = "https://lucasgpadilhan-max.github.io/agenda-painel/conectar.html";
+const MODO_CONEXAO = { coexistencia: "Número que já usa o WhatsApp Business (coexistência)", numero_novo: "Número novo, só do assistente" };
+function conexaoTxt(cx) {
+  if (!cx) return '<span class="chip warn">ainda não conectado pelo link</span>';
+  const chip = cx.estado === "ativo" ? "ok" : cx.estado === "erro" ? "bad" : "warn";
+  return `${esc(MODO_CONEXAO[cx.modo] ?? cx.modo ?? "")} · <span class="chip ${chip}">${esc(cx.estado ?? "")}</span>`
+    + (cx.conectado_em ? ` · conectado em ${data(cx.conectado_em)}` : "")
+    + (cx.estado === "sincronizando" ? '<br><span class="muted">A Meta ainda está sincronizando; o bot não envia até ficar <b>ativo</b>. Use "Verificar conexão" em alguns minutos.</span>' : "")
+    + (cx.estado === "erro" && cx.motivo ? `<br><span class="muted">Motivo: ${esc(cx.motivo)}. Gere um novo link.</span>` : "");
+}
 function abaWhatsApp(alvo) {
   const n = atual.negocio, c = n.config, info = c.whatsapp_info;
   const urlHook = plataforma?.webhook_url ?? URL_FUNCAO;
   alvo.innerHTML = `
     <div class="aviso">O número e a conta do WhatsApp na Meta são <b>sempre do cliente</b> (portfólio empresarial dele). A plataforma só recebe acesso para operar o bot;
       se o cliente sair, ele leva o número. Combine isso com o dono do negócio na contratação.</div>
+    <h4>Conexão pelo link (recomendado)</h4>
+    <div id="w-conexao">
+      <p class="peq muted">Gere o link e mande ao cliente. Ele entra com a conta Meta dele e escolhe: usar o número que já atende no WhatsApp Business
+        (coexistência, escaneando um QR no celular) ou um número novo só para o assistente. O token vai direto para o cofre; ninguém vê.</p>
+      <div class="peq">Situação: ${conexaoTxt(c.whatsapp_conexao)}</div>
+      <div class="linha" style="margin-top:8px"><button class="btn prim" id="w-gerar-link">Gerar link de conexão</button>
+        <button class="btn" id="w-verificar" ${c.whatsapp_conexao ? "" : "disabled"}>Verificar conexão</button></div>
+      <div id="w-link-res" style="margin-top:8px"></div>
+    </div>
+    <hr class="sep">
     <h4>Como a equipe atende quando o bot passa a conversa</h4>
     <div class="linha"><select id="w-atend" style="max-width:420px">
       ${opt("painel", c.atendimento_humano ?? "painel", "Pelo painel (número só do bot)")}${opt("app", c.atendimento_humano, "Pelo app WhatsApp Business no celular (coexistência)")}</select>
       <button class="btn prim" id="w-salvar-atend">Salvar</button></div>
     <details style="margin-top:6px"><summary class="peq">Como ligar a coexistência (mesmo número no app e no bot)</summary>
-      <ol class="passos peq"><li>O número precisa já estar no app <b>WhatsApp Business</b> do cliente (versão atualizada) e ser conectado pelo <b>cadastro incorporado</b> (Embedded Signup) da Meta, escolhendo "conectar app existente".</li>
-      <li>No app da plataforma, assine também o campo de webhook <span class="mono">smb_message_echoes</span>: é ele que traz para cá as mensagens que a equipe envia pelo celular.</li>
+      <ol class="passos peq"><li>O número precisa já estar no app <b>WhatsApp Business</b> do cliente (versão 2.24.17 ou mais nova). Conecte pelo <b>link de conexão</b> acima, opção "número que já usa o WhatsApp Business".</li>
+      <li>No app da plataforma, assine também os campos de webhook <span class="mono">smb_message_echoes</span>, <span class="mono">history</span> e <span class="mono">smb_app_state_sync</span> (os dois últimos são descartados): é ele que traz para cá as mensagens que a equipe envia pelo celular.</li>
       <li>Cada resposta da equipe pelo celular pausa o bot por 24 h naquela conversa. Mensagens da equipe não abrem a janela de 24 h.</li></ol></details>
     <hr class="sep">
-    <details ${atual.segredos.wa_token ? "" : "open"}><summary><b>Passo a passo na Meta</b></summary>
+    <details><summary><b>Alternativa: token colado à mão (passo a passo na Meta)</b></summary>
       <ol class="passos peq">
         <li>Em <a href="https://business.facebook.com" target="_blank" rel="noopener">business.facebook.com</a>, use (ou crie) o portfólio empresarial do cliente e adicione o número em <i>Contas do WhatsApp</i>.</li>
         <li>No app da plataforma em <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">developers.facebook.com</a> → WhatsApp → <i>Configuração da API</i>, copie o <b>Phone number ID</b> e o <b>WhatsApp Business Account ID</b>.</li>
@@ -1049,6 +1069,24 @@ function abaWhatsApp(alvo) {
       const j = await acaoServidor(acao, n.id);
       if (!j.ok) return r.innerHTML = `<div class="erro-msg">${esc(j.erro)}</div>`;
       toast(msgOk); recarregar();
+    } catch (e) { erroEm(r, e); }
+  };
+  $("#w-gerar-link").onclick = async () => {
+    const r = $("#w-link-res");
+    try {
+      const j = await rpc("admin_gerar_convite_conexao", { p_business_id: n.id });
+      const url = `${URL_CONECTAR}?c=${j.token}`;
+      r.innerHTML = `<div class="copiar"><input readonly id="w-link" value="${esc(url)}"><button class="btn mini" id="w-link-copiar">Copiar</button></div>
+        <div class="peq muted" style="margin-top:4px">Vale até ${data(j.expira_em)} e funciona uma vez só. Gerar outro cancela este.</div>`;
+      $("#w-link-copiar").onclick = () => copiar(url);
+    } catch (e) { erroEm(r, e); }
+  };
+  $("#w-verificar").onclick = async () => {
+    const r = $("#w-link-res"); r.innerHTML = '<span class="muted">Consultando a Meta…</span>';
+    try {
+      const j = await acaoServidor("verificar_conexao", n.id);
+      if (!j.ok) return r.innerHTML = `<div class="erro-msg">${esc(j.erro)}</div>`;
+      toast(j.estado === "ativo" ? "Conexão ativa" : "Ainda sincronizando"); recarregar();
     } catch (e) { erroEm(r, e); }
   };
   $("#w-testar").onclick = executar("testar_whatsapp", "Conexão ok");
@@ -1391,7 +1429,7 @@ const ACOES = { criar_negocio: "Criou cliente", atualizar_negocio: "Alterou clie
   salvar_profissional: "Salvou profissional", salvar_servico: "Salvou serviço", salvar_horarios: "Salvou horários",
   salvar_plano: "Alterou plano", mensalidade_pago: "Registrou pagamento", mensalidade_pendente: "Desfez pagamento",
   mensalidade_isento: "Isentou mensalidade", desativar_negocio: "Desativou cliente", reativar_negocio: "Reativou cliente", excluir_negocio: "Excluiu cliente",
-  testar_whatsapp: "Testou WhatsApp", inscrever_webhook: "Inscreveu webhook", testar_ia: "Testou IA" };
+  testar_whatsapp: "Testou WhatsApp", inscrever_webhook: "Inscreveu webhook", verificar_conexao: "Verificou conexão", gerar_convite_conexao: "Gerou link de conexão", conectar_whatsapp: "Cliente conectou o WhatsApp", testar_ia: "Testou IA" };
 async function carregarAuditoria() {
   try {
     const l = await rpc("admin_auditoria_recente", { p_limite: 150 });

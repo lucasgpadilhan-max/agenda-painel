@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Conectar WhatsApp · Assistente de Agenda</title>
+<style>
+  :root { --bg: #f5f6f8; --card: #fff; --ink: #1d2433; --muted: #6b7385; --line: #e3e6ec; --brand: #1f6f5c; --bad: #c0392b; --ok: #1f8a4c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 580px; margin: 40px auto; padding: 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  h1 { font-size: 19px; margin: 0 0 6px; }
+  .opcao { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 10px 0; cursor: pointer; }
+  .opcao input { margin-top: 4px; }
+  .aviso { background: #fff8e6; border: 1px solid #f1dfae; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin: 12px 0 16px; }
+  .aviso ul { margin: 6px 0 0; padding-left: 18px; }
+  button { border: 0; background: var(--brand); color: #fff; padding: 12px 18px; border-radius: 8px; font: inherit; font-weight: 700; cursor: pointer; width: 100%; }
+  button:disabled { opacity: .55; cursor: default; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .erro { color: var(--bad); margin-top: 12px; }
+  .ok { color: var(--ok); font-weight: 700; }
+</style>
+</head>
+<body>
+<main><div class="card" id="conteudo"><p class="muted">Carregando…</p></div>
+<p class="muted" style="text-align:center;margin-top:14px">Seus dados de acesso à Meta não passam por esta página: o login acontece na janela da própria Meta.</p></main>
+<script>
+(() => {
+  const URL_FUNCAO = "https://vesskijhvnuuntlwdlze.supabase.co/functions/v1/whatsapp-webhook/conectar";
+  const VERSAO = "v25.0";
+  const EVENTO = { coexistencia: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", numero_novo: "FINISH" };
+  const c = new URLSearchParams(window.location.search).get("c") || "";
+  const alvo = document.getElementById("conteudo");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (x) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[x]);
+
+  const AVISOS = {
+    coexistencia: `<b>Antes de conectar:</b> o celular precisa estar com o <b>WhatsApp Business</b> na versão 2.24.17 ou mais nova e à mão para escanear um QR code.
+      <ul><li>Você continua atendendo pelo celular normalmente; o assistente responde pelo mesmo número.</li>
+      <li>O WhatsApp Web e outros aparelhos vinculados são desconectados (dá para vincular de novo; o app de Windows não é suportado).</li>
+      <li>Deixam de funcionar no app: mensagem de saudação e de ausência, respostas rápidas, etiquetas e catálogo.</li>
+      <li>Mensagens temporárias, de visualização única e localização em tempo real ficam desligadas; listas de transmissão viram só leitura.</li>
+      <li>Depois de conectar, deixe o app aberto alguns minutos para a Meta sincronizar.</li></ul>`,
+    numero_novo: `<b>Antes de conectar:</b> o número novo não pode estar em nenhum WhatsApp (nem pessoal nem Business) e precisa receber SMS ou ligação para o código de verificação.
+      <ul><li>Esse número fica só para o assistente; a equipe é avisada quando o paciente precisar de atendimento.</li></ul>`,
+  };
+
+  let modo = "coexistencia", sessao = null, codigo = null, enviando = false, cancelado = false;
+
+  function erro(msg) { alvo.innerHTML = `<h1>Conectar WhatsApp</h1><p class="erro">${esc(msg)}</p>`; }
+
+  function mostrar(info) {
+    alvo.innerHTML = `<h1>Conectar o WhatsApp · ${esc(info.cliente)}</h1>
+      <p class="muted">Escolha qual número o assistente vai usar. O número e a conta continuam sendo seus.</p>
+      <label class="opcao"><input type="radio" name="modo" value="coexistencia" checked>
+        <span><b>Usar o número que já atende no WhatsApp Business</b><br><span class="muted">Recomendado: os pacientes continuam no mesmo número.</span></span></label>
+      <label class="opcao"><input type="radio" name="modo" value="numero_novo">
+        <span><b>Usar um número novo, só para o assistente</b><br><span class="muted">Um chip ou número que ainda não tem WhatsApp.</span></span></label>
+      <div class="aviso" id="aviso">${AVISOS.coexistencia}</div>
+      <button id="conectar">Conectar WhatsApp</button>
+      <p class="erro" id="msg"></p>`;
+    alvo.querySelectorAll("input[name=modo]").forEach((r) => {
+      const mudar = () => { if (r.checked) { modo = r.value; document.getElementById("aviso").innerHTML = AVISOS[modo]; } };
+      r.addEventListener("change", mudar); r.addEventListener("click", mudar);
+    });
+    document.getElementById("conectar").onclick = () => iniciar(info);
+  }
+
+  function liberar(msg) {
+    const b = document.getElementById("conectar");
+    if (b) { b.disabled = false; b.textContent = "Conectar WhatsApp"; }
+    const m = document.getElementById("msg"); if (m) m.textContent = msg || "";
+    sessao = null; codigo = null; enviando = false;
+  }
+
+  function iniciar(info) {
+    const b = document.getElementById("conectar");
+    if (b.disabled) return;
+    b.disabled = true; b.textContent = "Siga os passos na janela da Meta…";
+    document.getElementById("msg").textContent = "";
+    sessao = null; codigo = null; cancelado = false;
+    const extras = { setup: {}, sessionInfoVersion: "3" };
+    if (modo === "coexistencia") extras.featureType = "whatsapp_business_app_onboarding";
+    window.FB.login((resp) => {
+      const code = resp && resp.authResponse && resp.authResponse.code;
+      if (!code) return liberar(cancelado ? "" : "A conexão foi interrompida. Tente de novo.");
+      codigo = code; enviar();
+    }, { config_id: info.config_id, response_type: "code", override_default_response_type: true, extras });
+  }
+
+  // Evento de sessão do Embedded Signup (traz o id da conta do WhatsApp)
+  window.addEventListener("message", (ev) => {
+    if (!/^https:\/\/([a-z0-9-]+\.)*facebook\.com$/.test(ev.origin)) return;
+    let d; try { d = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data; } catch { return; }
+    if (!d || d.type !== "WA_EMBEDDED_SIGNUP") return;
+    if (d.event === "CANCEL") { cancelado = true; return liberar(""); }
+    if (d.event === EVENTO.coexistencia || d.event === EVENTO.numero_novo) {
+      sessao = { evento: d.event, waba_id: String((d.data && d.data.waba_id) || "") };
+      enviar();
+    }
+  });
+
+  async function enviar() {
+    if (!codigo || !sessao || !sessao.evento || enviando) return;
+    enviando = true;
+    const b = document.getElementById("conectar"); if (b) b.textContent = "Finalizando a conexão…";
+    try {
+      const res = await fetch(URL_FUNCAO, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ c, code: codigo, modo, evento: sessao.evento, waba_id: sessao.waba_id }) });
+      const j = await res.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.erro || "Não deu certo. Peça um novo link ao suporte.");
+      alvo.innerHTML = j.estado === "ativo"
+        ? `<h1 class="ok">Conectado ✅</h1><p>Pronto! O WhatsApp foi conectado ao assistente. Você já pode fechar esta página.</p>`
+        : `<h1 class="ok">Conectado — sincronizando</h1><p>Agora deixe o WhatsApp Business aberto no celular por alguns minutos enquanto a Meta termina a sincronização.
+           Não precisa fazer mais nada nesta página.</p>`;
+    } catch (e) {
+      liberar(e.message);
+      if (b) { b.disabled = true; b.textContent = "Peça um novo link"; }
+    }
+  }
+
+  function carregarSdk(appId) {
+    const pronto = () => window.FB.init({ appId, autoLogAppEvents: true, xfbml: false, version: VERSAO });
+    if (window.FB) return pronto();
+    window.fbAsyncInit = pronto;
+    const s = document.createElement("script");
+    s.async = true; s.defer = true; s.crossOrigin = "anonymous"; s.src = "https://connect.facebook.net/pt_BR/sdk.js";
+    document.head.appendChild(s);
+  }
+
+  (async () => {
+    if (!/^[0-9a-f]{64}$/.test(c)) return erro("Este link está vencido ou já usado. Peça um novo ao suporte.");
+    try {
+      const res = await fetch(`${URL_FUNCAO}?c=${encodeURIComponent(c)}`);
+      const j = await res.json().catch(() => ({}));
+      if (!j.valido) return erro("Este link está vencido ou já usado. Peça um novo ao suporte.");
+      if (!j.app_id || !j.config_id) return erro("A conexão ainda não está disponível. Avise o suporte.");
+      carregarSdk(j.app_id);
+      mostrar(j);
+    } catch { erro("Não consegui falar com o servidor. Tente de novo em instantes."); }
+  })();
+})();
+</script>
+</body>
+</html>
