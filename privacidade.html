@@ -35,7 +35,7 @@
       <h1>Política de privacidade — ${nome}</h1>
       <p class="muted">Como ${nome} cuida dos seus dados no atendimento pelo WhatsApp.</p>
       <h2>Quem cuida dos seus dados</h2>
-      <p><b>${razao}</b>${p.cnpj ? `, CNPJ ${esc(p.cnpj)}` : ""}${p.endereco ? `, ${esc(p.endereco)}` : ""}, é a responsável pelos seus dados
+      <p><b>${razao}</b>${p.cnpj ? `, CNPJ ${esc(p.cnpj)}` : ""}${p.endereco ? `, ${esc(p.endereco)}` : ""}${p.cnpj || p.endereco ? "," : ""} é a responsável pelos seus dados
         (controladora, nos termos da LGPD). O atendimento automático pelo WhatsApp é feito por uma <b>assistente virtual</b> com
         inteligência artificial, operada por uma plataforma contratada, que trata os dados só para isso e segundo as instruções de ${nome}.</p>
       <h2>Quais dados usamos</h2>
