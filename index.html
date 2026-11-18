@@ -91,6 +91,8 @@
   .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
   .card.clicavel { cursor: pointer; } .card.clicavel:hover { border-color: #c9ced8; }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .lateral { position: static; max-height: none; } .duas, .tres { grid-template-columns: 1fr; } nav.topo { flex-wrap: wrap; } }
+  .termo{border:1px solid #ddd;border-radius:8px;padding:12px 16px;max-height:520px;overflow:auto;background:#fff}
+  .termo h1{font-size:18px}.termo h2{font-size:15px;margin-top:14px}
 </style>
 </head>
 <body>
@@ -114,6 +116,7 @@
       <button data-aba="erros">Erros <span id="cont-erros" class="cont oculto"></span></button>
       <button data-aba="testes">Testes</button>
       <button data-aba="segmentos">Segmentos</button>
+      <button data-aba="contrato">Contrato</button>
       <button data-aba="auditoria">Auditoria</button>
     </nav>
     <div class="direita"><button id="cont-aguardando" class="btn oculto" title="Conversas esperando a equipe"></button><span id="quem"></span><button class="btn" id="sair">Sair</button></div>
@@ -156,6 +159,18 @@
       <div id="editor-segmento" class="card oculto" style="margin-top:14px"></div>
     </section>
 
+    <section id="aba-contrato" class="oculto">
+      <div class="linha entre" style="margin-bottom:12px"><h2 style="margin:0">Termo de uso</h2></div>
+      <p class="muted peq">Um modelo único para todos os clientes. Os campos entre <span class="mono">{{ }}</span> são preenchidos com os dados de cada cliente na aba <b>Contrato</b> dele.
+        Mudar o modelo vale para os próximos termos impressos; os já emitidos ficam guardados como foram.</p>
+      <div class="card"><h3 style="margin-top:0">Dados da sua empresa e prazos</h3><div id="cp-campos" class="grid2"></div>
+        <div class="linha" style="margin-top:8px"><button class="btn prim" id="cp-salvar">Salvar dados</button></div></div>
+      <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Modelo <span id="cm-versao" class="muted peq"></span></h3>
+        <div class="grid2"><div><textarea id="cm-texto" rows="24" class="mono" style="width:100%"></textarea>
+          <div class="linha" style="margin-top:8px"><button class="btn prim" id="cm-salvar">Salvar modelo</button></div><div id="cm-erro"></div>
+          <h4>Variáveis</h4><div id="cm-variaveis" class="peq"></div></div>
+          <div><h4 style="margin-top:0">Prévia (cliente de exemplo)</h4><div id="cm-previa" class="termo"></div></div></div></div>
+    </section>
     <section id="aba-auditoria" class="oculto">
       <h2>Alterações feitas pelo painel</h2>
       <p class="muted peq">Registra quem mudou o quê. Valores de tokens e senhas nunca são gravados aqui.</p>
@@ -190,11 +205,123 @@ const PROVEDORES = {
   openai: { nome: "OpenAI", modelos: ["gpt-5-mini", "gpt-5"], site: "https://platform.openai.com/api-keys" },
 };
 const ABAS_NEG = [["visao", "Visão geral"], ["config", "Configuração inicial"], ["conversas", "Conversas"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
-  ["avisos", "Avisos"], ["privacidade", "Privacidade"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
+  ["avisos", "Avisos"], ["privacidade", "Privacidade"], ["contrato", "Contrato"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
 
 let segmentos = [];
 let negocios = [], verticais = [], plataforma = null, atual = null, abaNeg = "visao", timerQA = null, filtroErros = "aberto";
 let timerConversas = null, conversaAberta = null;
+
+// ---------------------------------------------------------------------
+// Termo de uso: variáveis, preenchimento e markdown (funções puras, testadas em testes/contrato.test.mjs)
+// ---------------------------------------------------------------------
+var VARIAVEIS_CONTRATO = [
+  ["plataforma_nome", "Nome da sua empresa"], ["plataforma_cnpj", "CNPJ da sua empresa"], ["plataforma_endereco", "Endereço da sua empresa"],
+  ["plataforma_email", "E-mail da sua empresa"], ["canal_suporte", "Canal de suporte"], ["foro_cidade", "Cidade do foro"], ["foro_uf", "UF do foro"],
+  ["indice_reajuste", "Índice de reajuste"], ["aviso_previo_dias", "Aviso prévio para encerrar (dias)"], ["incidente_horas", "Aviso de incidente (horas)"],
+  ["exclusao_pedido_dias", "Prazo para atender pedido de exclusão (dias)"], ["fim_contrato_dias", "Prazo para apagar dados no fim do contrato (dias)"],
+  ["limite_meses", "Limite de responsabilidade (meses de mensalidade)"], ["atraso_suspensao_dias", "Atraso que permite suspender (dias)"],
+  ["cliente_nome", "Nome do negócio no painel"], ["cliente_razao_social", "Razão social ou nome do cliente"], ["cliente_documento", "CPF ou CNPJ do cliente"],
+  ["cliente_documento_tipo", "\"CPF\" ou \"CNPJ\""], ["cliente_representante", "Representante do cliente"], ["cliente_email", "E-mail do cliente"],
+  ["cliente_endereco", "Endereço do cliente"], ["mensalidade_valor", "Mensalidade (aba Assinatura)"], ["mensalidade_dia", "Dia de vencimento (aba Assinatura)"],
+  ["implantacao_valor", "Taxa de implantação"], ["data_inicio", "Início do contrato"], ["data_emissao", "Data da emissão (hoje)"],
+  ["ia_provedor", "Provedor de IA em uso"], ["suboperadores", "Lista do anexo de suboperadores"], ["clausulas_extras", "Cláusulas só deste cliente (seção 8)"],
+];
+var NOMES_IA_CONTRATO = { anthropic: "Anthropic (EUA)", groq: "Groq (EUA)", gemini: "Google Gemini (EUA)", openai: "OpenAI (EUA)" };
+
+function documentoValido(s) {
+  const d = String(s ?? "").replace(/\D/g, "");
+  if (!/^(\d{11}|\d{14})$/.test(d) || /^(\d)\1+$/.test(d)) return null;
+  const dv = (base, pesos) => { const r = pesos.reduce((t, p, i) => t + Number(base[i]) * p, 0) % 11; return r < 2 ? 0 : 11 - r; };
+  if (d.length === 11) {
+    const p1 = [10, 9, 8, 7, 6, 5, 4, 3, 2];
+    const ok = dv(d, p1) === Number(d[9]) && dv(d, [11, ...p1]) === Number(d[10]);
+    return ok ? "CPF" : null;
+  }
+  const p1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  return dv(d, p1) === Number(d[12]) && dv(d, [6, ...p1]) === Number(d[13]) ? "CNPJ" : null;
+}
+function formatarDocumento(s) {
+  const d = String(s ?? "").replace(/\D/g, "");
+  if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  return d;
+}
+// Número digitado em qualquer formato comum → número (ou null)
+function numeroBR(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  let s = String(v ?? "").trim().replace(/^R\$\s*/i, "");
+  if (!s) return null;
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : null;
+}
+function valorBR(v) {
+  const n = numeroBR(v);
+  return n === null ? null : n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function variaveisContrato(d, hoje = new Date()) {
+  const p = d.plataforma ?? {}, n = d.negocio ?? {}, c = d.contrato ?? {};
+  const txt = (x) => { const s = String(x ?? "").trim(); return s && s.toUpperCase() !== "TODO" ? s : null; };
+  const dataBR = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? "")) ? iso.split("-").reverse().join("/") : null;
+  const tipo = documentoValido(c.documento);
+  const prov = n.llm?.provedor && n.llm.provedor !== "plataforma" ? n.llm.provedor : d.ia_padrao?.provedor;
+  const ia = NOMES_IA_CONTRATO[prov] ?? txt(prov);
+  const sub = [
+    "- **Supabase** — banco de dados e servidor do assistente · dados da cláusula 5.2 · São Paulo (Brasil)",
+    "- **Meta (WhatsApp Cloud API)** — envio e recebimento das mensagens · telefone e mensagens · conta do Cliente na Meta",
+    ...(n.usa_google ? ["- **Google (Agenda)** — sincronizar a agenda · nome, telefone e horário · conta Google do Cliente"] : []),
+    ...(ia ? [`- **${ia}** — entender e responder as mensagens · conversa e dados do atendimento`] : []),
+    "- **Resend** — e-mail de alerta técnico para a Plataforma · nenhum dado de paciente · EUA",
+  ].join("\n");
+  const v = {};
+  for (const k of ["plataforma_nome", "plataforma_cnpj", "plataforma_endereco", "plataforma_email", "canal_suporte", "foro_cidade", "foro_uf",
+    "indice_reajuste", "aviso_previo_dias", "incidente_horas", "exclusao_pedido_dias", "fim_contrato_dias", "limite_meses", "atraso_suspensao_dias"]) v[k] = txt(p[k]);
+  Object.assign(v, {
+    cliente_nome: txt(n.nome), cliente_razao_social: txt(c.razao_social),
+    cliente_documento: tipo ? formatarDocumento(c.documento) : null, cliente_documento_tipo: tipo,
+    cliente_representante: txt(c.representante), cliente_email: txt(c.email), cliente_endereco: txt(c.endereco) ?? txt(n.endereco),
+    mensalidade_valor: valorBR(n.mensalidade_valor), mensalidade_dia: txt(n.mensalidade_dia), implantacao_valor: valorBR(c.implantacao_valor),
+    data_inicio: dataBR(c.inicio), data_emissao: hoje.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }),
+    ia_provedor: ia ?? null, suboperadores: ia ? sub : null,
+    clausulas_extras: txt(c.clausulas_extras) ? "## 8. Disposições específicas\n\n" + String(c.clausulas_extras).trim() : "",
+  });
+  return v;
+}
+function preencherContrato(modelo, vars) {
+  const faltando = [], desconhecidas = [];
+  let texto = String(modelo ?? "").replace(/\{\{([^{}]*)\}\}/g, (todo, nome) => {
+    if (!Object.prototype.hasOwnProperty.call(vars, nome)) { if (!desconhecidas.includes(nome)) desconhecidas.push(nome); return todo; }
+    const v = vars[nome];
+    if (v === null || v === undefined) { if (!faltando.includes(nome)) faltando.push(nome); return `[FALTA: ${nome}]`; }
+    return String(v);
+  });
+  for (const m of texto.matchAll(/\{\{(?![^{}]*\}\})([^{}\s]*)/g)) if (!desconhecidas.includes(m[1])) desconhecidas.push(m[1]);
+  return { texto, faltando, desconhecidas };
+}
+function markdownContrato(texto) {
+  const inline = (s) => esc(s).replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>");
+  const blocos = String(texto ?? "").replace(/\r/g, "").split(/\n{2,}/);
+  const html = [];
+  for (const b of blocos) {
+    const linhas = b.split("\n").filter((l) => l.trim());
+    if (!linhas.length) continue;
+    let i = 0;
+    while (i < linhas.length) {
+      const l = linhas[i];
+      const h = l.match(/^(#{1,2})\s+(.*)$/);
+      if (h) { html.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i++; continue; }
+      if (/^-\s+/.test(l)) {
+        const itens = [];
+        while (i < linhas.length && /^-\s+/.test(linhas[i])) itens.push(`<li>${inline(linhas[i++].replace(/^-\s+/, ""))}</li>`);
+        html.push(`<ul>${itens.join("")}</ul>`); continue;
+      }
+      const par = [];
+      while (i < linhas.length && !/^(#{1,2})\s+|^-\s+/.test(linhas[i])) par.push(inline(linhas[i++]));
+      html.push(`<p>${par.join("<br>")}</p>`);
+    }
+  }
+  return html.join("\n");
+}
 
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 4000); }
 async function rpc(fn, args = {}) {
@@ -264,8 +391,9 @@ $("#sair").onclick = async () => { await sb.auth.signOut(); location.reload(); }
 
 function irPara(aba) {
   $$("nav.topo button").forEach((x) => x.classList.toggle("ativo", x.dataset.aba === aba));
-  for (const a of ["clientes", "erros", "testes", "segmentos", "auditoria"]) $("#aba-" + a).classList.toggle("oculto", a !== aba);
+  for (const a of ["clientes", "erros", "testes", "segmentos", "contrato", "auditoria"]) $("#aba-" + a).classList.toggle("oculto", a !== aba);
   if (aba === "segmentos") carregarSegmentos();
+  if (aba === "contrato") carregarContrato();
   if (aba === "erros") carregarResumoErros();
   if (aba === "testes") carregarQA();
   if (aba === "auditoria") carregarAuditoria();
@@ -372,7 +500,7 @@ async function recarregar() { await carregarClientes(); await abrirNegocio(atual
 function desenharAba() {
   const alvo = $("#conteudo-neg");
   clearInterval(timerConversas); timerConversas = null;
-  const fn = { visao: abaVisao, config: abaConfig, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, privacidade: abaPrivacidade, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
+  const fn = { visao: abaVisao, config: abaConfig, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, privacidade: abaPrivacidade, contrato: abaContrato, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
   alvo.innerHTML = ""; fn(alvo);
 }
 
@@ -1169,6 +1297,125 @@ async function abaPrivacidade(alvo) {
         ${cu.conversas} conversa(s) · ${cu.reservas} reserva(s)</span> <button class="btn mini perigo" data-excluir>Excluir dados</button></div>`;
       $("[data-excluir]", r).onclick = () => confirmar(cu);
     } catch (e) { erroEm(r, e); }
+  };
+}
+
+// Aba de topo Contrato: dados da plataforma e modelo único do termo.
+var CAMPOS_PLATAFORMA_CONTRATO = VARIAVEIS_CONTRATO.slice(0, 14);
+var CLIENTE_EXEMPLO_CONTRATO = { razao_social: "Clínica Exemplo Ltda", documento: "11222333000181", representante: "Maria Exemplo", email: "contato@exemplo.com",
+  endereco: "Rua Exemplo, 100 — Centro", implantacao_valor: 0, inicio: "2026-12-01", clausulas_extras: "" };
+async function carregarContrato() {
+  const neg = atual?.negocio.id ?? negocios.find((x) => !x.qa)?.id ?? negocios[0]?.id;
+  if (!neg) return erroEm($("#cp-campos"), new Error("Cadastre um cliente para ver a prévia."));
+  let dados;
+  try { dados = await rpc("admin_contrato_dados", { p_business_id: neg }); } catch (e) { return erroEm($("#cp-campos"), e); }
+  const p = dados.plataforma ?? {};
+  $("#cp-campos").innerHTML = CAMPOS_PLATAFORMA_CONTRATO.map(([k, rot]) =>
+    `<div><label>${esc(rot)}</label><input id="cp-${k}" value="${esc(p[k] ?? "")}"></div>`).join("");
+  $("#cm-texto").value = dados.modelo?.texto ?? "";
+  $("#cm-versao").textContent = `versão ${dados.modelo?.versao ?? "—"}`;
+  $("#cm-erro").innerHTML = "";
+  $("#cm-variaveis").innerHTML = VARIAVEIS_CONTRATO.map(([k, rot]) => `<div><span class="mono">{{${esc(k)}}}</span> — ${esc(rot)}</div>`).join("");
+  const exemplo = () => ({ ...dados, plataforma: Object.fromEntries(CAMPOS_PLATAFORMA_CONTRATO.map(([k]) => [k, $("#cp-" + k).value])),
+    negocio: { nome: "Clínica Exemplo", endereco: "", mensalidade_valor: 197, mensalidade_dia: 10, llm: null, usa_google: true },
+    contrato: CLIENTE_EXEMPLO_CONTRATO, ia_padrao: plataforma?.ia_padrao ?? { provedor: "anthropic" } });
+  const previa = () => {
+    const r = preencherContrato($("#cm-texto").value, variaveisContrato(exemplo()));
+    $("#cm-previa").innerHTML = markdownContrato(r.texto);
+    return r;
+  };
+  $("#cm-texto").oninput = previa;
+  $$("#cp-campos input").forEach((i) => i.oninput = previa);
+  previa();
+  $("#cp-salvar").onclick = async () => {
+    try {
+      await rpc("admin_salvar_contrato_plataforma", { p_dados: Object.fromEntries(CAMPOS_PLATAFORMA_CONTRATO.map(([k]) => [k, $("#cp-" + k).value.trim() || null])) });
+      toast("Dados da plataforma salvos");
+    } catch (e) { erroEm($("#cm-erro"), e); }
+  };
+  $("#cm-salvar").onclick = async () => {
+    const r = previa(), erro = $("#cm-erro");
+    if (r.desconhecidas.length) return erro.innerHTML = `<div class="erro-msg">Variáveis desconhecidas: ${esc(r.desconhecidas.map((x) => `{{${x}}}`).join(", "))}. Confira a lista abaixo.</div>`;
+    try {
+      const v = await rpc("admin_salvar_modelo_contrato", { p_texto: $("#cm-texto").value });
+      erro.innerHTML = `<span class="chip ok">Modelo salvo (versão ${esc(v)})</span>`;
+      $("#cm-versao").textContent = `versão ${v}`;
+    } catch (e) { erroEm(erro, e); }
+  };
+}
+
+// Termo de uso do cliente: campos, prévia preenchida, o que falta e impressão (cada impressão fica registrada).
+async function abaContrato(alvo) {
+  const n = atual.negocio;
+  alvo.innerHTML = '<p class="muted">Carregando…</p>';
+  let dados;
+  try { dados = await rpc("admin_contrato_dados", { p_business_id: n.id }); } catch (e) { return erroEm(alvo, e); }
+  const c = dados.contrato ?? {};
+  const montar = () => {
+    const d = { ...dados, contrato: lerCampos(), ia_padrao: plataforma?.ia_padrao };
+    return preencherContrato(dados.modelo?.texto ?? "", variaveisContrato(d));
+  };
+  alvo.innerHTML = `
+    <p class="muted peq">O texto vem do modelo único (aba de topo <b>Contrato</b>, versão ${esc(dados.modelo?.versao ?? "—")}). Aqui ficam só os dados deste cliente.
+      Mensalidade e dia de vencimento vêm da aba <b>Assinatura</b>.</p>
+    <div class="grid2">
+      <div><label>Razão social (ou nome, se pessoa física)</label><input id="ct-razao" value="${esc(c.razao_social ?? "")}"></div>
+      <div><label>CPF ou CNPJ</label><input id="ct-doc" value="${esc(c.documento ? formatarDocumento(c.documento) : "")}"></div>
+      <div><label>Representante legal</label><input id="ct-rep" value="${esc(c.representante ?? "")}"></div>
+      <div><label>E-mail</label><input id="ct-email" value="${esc(c.email ?? "")}"></div>
+      <div><label>Endereço (vazio = endereço da aba Negócio)</label><input id="ct-end" value="${esc(c.endereco ?? "")}"></div>
+      <div><label>Taxa de implantação (R$; 0 se não houver)</label><input id="ct-impl" value="${esc(c.implantacao_valor ?? "")}" placeholder="0,00"></div>
+      <div><label>Início do contrato</label><input id="ct-inicio" type="date" value="${esc(c.inicio ?? "")}"></div>
+    </div>
+    <label>Cláusulas só deste cliente (opcional; viram a seção 8)</label><textarea id="ct-extras" rows="3">${esc(c.clausulas_extras ?? "")}</textarea>
+    <div id="ct-erro"></div>
+    <div class="linha" style="margin-top:8px"><button class="btn prim" id="ct-salvar">Salvar</button>
+      <button class="btn" id="ct-imprimir">Imprimir / salvar PDF</button></div>
+    <div id="ct-falta" style="margin-top:8px"></div>
+    <h4>Emissões</h4><div id="ct-emissoes" class="peq"></div>
+    <h4>Prévia</h4><div id="ct-previa" class="termo"></div>`;
+  function lerCampos() {
+    return { razao_social: $("#ct-razao").value.trim() || null, documento: $("#ct-doc").value.replace(/\D/g, "") || null,
+      representante: $("#ct-rep").value.trim() || null, email: $("#ct-email").value.trim() || null, endereco: $("#ct-end").value.trim() || null,
+      implantacao_valor: numeroBR($("#ct-impl").value), inicio: $("#ct-inicio").value || null, clausulas_extras: $("#ct-extras").value.trim() || null };
+  }
+  const atualizar = () => {
+    const r = montar();
+    $("#ct-previa").innerHTML = markdownContrato(r.texto);
+    const prob = [...r.faltando.map((x) => `falta ${x}`), ...r.desconhecidas.map((x) => `variável desconhecida no modelo: {{${x}}}`)];
+    $("#ct-falta").innerHTML = prob.length ? `<div class="erro-msg">Falta preencher: ${esc(prob.join(", "))}</div>` : '<span class="chip ok">termo completo</span>';
+    $("#ct-imprimir").disabled = prob.length > 0;
+    return r;
+  };
+  const em = dados.emissoes ?? [];
+  $("#ct-emissoes").innerHTML = em.length ? em.map((x) => `<div>${data(x.emitido_em)} · versão ${esc(x.versao_modelo)}</div>`).join("") : '<span class="muted">Nenhum termo emitido ainda.</span>';
+  $$("input, textarea", alvo).forEach((i) => i.addEventListener("input", atualizar));
+  atualizar();
+  $("#ct-salvar").onclick = () => {
+    const campos = lerCampos(), erro = $("#ct-erro");
+    erro.innerHTML = "";
+    if (campos.documento && !documentoValido(campos.documento)) return erro.innerHTML = '<div class="erro-msg">CPF/CNPJ inválido: confira os números.</div>';
+    if ($("#ct-impl").value.trim() && campos.implantacao_valor === null) return erro.innerHTML = '<div class="erro-msg">Taxa de implantação inválida (ex.: 1.500,00).</div>';
+    salvarNegocio({ config: { contrato: campos } }, "Contrato salvo");
+  };
+  $("#ct-imprimir").onclick = async () => {
+    const r = atualizar();
+    if (r.faltando.length || r.desconhecidas.length) return;
+    try {
+      await rpc("admin_registrar_emissao", { p_business_id: n.id, p_versao: dados.modelo.versao, p_texto: r.texto });
+    } catch (e) {
+      if (/MODELO_DESATUALIZADO/.test(e.message)) { toast("O modelo mudou; confira a prévia de novo"); return abaContrato(alvo); }
+      return erroEm($("#ct-erro"), e);
+    }
+    const j = window.open("");
+    if (j) {
+      j.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Termo de uso — ${esc(n.nome)}</title><style>
+        body{font-family:Georgia,serif;max-width:720px;margin:32px auto;line-height:1.5;color:#111;font-size:12pt}
+        h1{font-size:18pt;text-align:center}h2{font-size:13pt;margin-top:20px}@media print{body{margin:0}}</style></head><body>${markdownContrato(r.texto)}</body></html>`);
+      j.document.close(); j.focus(); j.print();
+    }
+    toast("Termo emitido e registrado");
+    abaContrato(alvo);
   };
 }
 
