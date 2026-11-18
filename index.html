@@ -224,7 +224,7 @@ var VARIAVEIS_CONTRATO = [
   ["cliente_documento_tipo", "\"CPF\" ou \"CNPJ\""], ["cliente_representante", "Representante do cliente"], ["cliente_email", "E-mail do cliente"],
   ["cliente_endereco", "Endereço do cliente"], ["mensalidade_valor", "Mensalidade (aba Assinatura)"], ["mensalidade_dia", "Dia de vencimento (aba Assinatura)"],
   ["implantacao_valor", "Taxa de implantação"], ["data_inicio", "Início do contrato"], ["data_emissao", "Data da emissão (hoje)"],
-  ["ia_provedor", "Provedor de IA em uso"], ["suboperadores", "Lista do anexo de suboperadores"], ["clausulas_extras", "Cláusulas só deste cliente (seção 8)"],
+  ["ia_provedor", "Provedor de IA em uso"], ["suboperadores", "Lista do anexo de suboperadores"], ["clausulas_extras", "Cláusulas só deste cliente"],
 ];
 var NOMES_IA_CONTRATO = { anthropic: "Anthropic (EUA)", groq: "Groq (EUA)", gemini: "Google Gemini (EUA)", openai: "OpenAI (EUA)" };
 
@@ -283,7 +283,7 @@ function variaveisContrato(d, hoje = new Date()) {
     mensalidade_valor: valorBR(n.mensalidade_valor), mensalidade_dia: txt(n.mensalidade_dia), implantacao_valor: valorBR(c.implantacao_valor),
     data_inicio: dataBR(c.inicio), data_emissao: hoje.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }),
     ia_provedor: ia ?? null, suboperadores: ia ? sub : null,
-    clausulas_extras: txt(c.clausulas_extras) ? "## 8. Disposições específicas\n\n" + String(c.clausulas_extras).trim() : "",
+    clausulas_extras: txt(c.clausulas_extras) ? "## Disposições específicas deste cliente\n\n" + String(c.clausulas_extras).trim() : "",
   });
   return v;
 }
@@ -1367,7 +1367,7 @@ async function abaContrato(alvo) {
       <div><label>Taxa de implantação (R$; 0 se não houver)</label><input id="ct-impl" value="${esc(c.implantacao_valor ?? "")}" placeholder="0,00"></div>
       <div><label>Início do contrato</label><input id="ct-inicio" type="date" value="${esc(c.inicio ?? "")}"></div>
     </div>
-    <label>Cláusulas só deste cliente (opcional; viram a seção 8)</label><textarea id="ct-extras" rows="3">${esc(c.clausulas_extras ?? "")}</textarea>
+    <label>Cláusulas só deste cliente (opcional; viram a seção "Disposições específicas")</label><textarea id="ct-extras" rows="3">${esc(c.clausulas_extras ?? "")}</textarea>
     <div id="ct-erro"></div>
     <div class="linha" style="margin-top:8px"><button class="btn prim" id="ct-salvar">Salvar</button>
       <button class="btn" id="ct-imprimir">Imprimir / salvar PDF</button></div>

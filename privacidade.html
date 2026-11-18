@@ -29,34 +29,49 @@
     const nome = esc(p.nome);
     document.title = `Política de privacidade · ${p.nome}`;
     const contato = [p.email && `e-mail <b>${esc(p.email)}</b>`, p.telefone && `telefone <b>${esc(p.telefone)}</b>`].filter(Boolean).join(" ou ");
+    const razao = esc(p.razao_social || p.nome);
+    const fim = Number(p.fim_contrato_dias) || 30, prazo = Number(p.exclusao_pedido_dias) || 15;
     alvo.innerHTML = `
       <h1>Política de privacidade — ${nome}</h1>
-      <p class="muted">Como ${nome} cuida dos seus dados no atendimento pelo WhatsApp${p.endereco ? ` · ${esc(p.endereco)}` : ""}.</p>
+      <p class="muted">Como ${nome} cuida dos seus dados no atendimento pelo WhatsApp.</p>
       <h2>Quem cuida dos seus dados</h2>
-      <p><b>${nome}</b> é responsável pelos seus dados (controladora, nos termos da LGPD). O atendimento automático pelo WhatsApp é
-        operado por uma plataforma contratada, que trata os dados só para isso e segundo as instruções de ${nome}.</p>
+      <p><b>${razao}</b>${p.cnpj ? `, CNPJ ${esc(p.cnpj)}` : ""}${p.endereco ? `, ${esc(p.endereco)}` : ""}, é a responsável pelos seus dados
+        (controladora, nos termos da LGPD). O atendimento automático pelo WhatsApp é feito por uma <b>assistente virtual</b> com
+        inteligência artificial, operada por uma plataforma contratada, que trata os dados só para isso e segundo as instruções de ${nome}.</p>
       <h2>Quais dados usamos</h2>
       <ul><li>Nome e telefone do WhatsApp;</li><li>as mensagens que você troca com o atendimento;</li>
         <li>seus agendamentos (serviço, dia e horário).</li></ul>
-      <p>Não pedimos informações sobre sua saúde por aqui. Se você mencionar algo assim numa mensagem, a conversa é passada para a equipe.</p>
+      <p>Não pedimos informações sobre sua saúde por aqui. Se você mencionar algo assim numa mensagem, a conversa é passada para a equipe.
+        Como agendar em ${nome} pode indicar um cuidado de saúde, tratamos tudo com o cuidado de dado sensível.</p>
       <h2>Para que usamos</h2>
       <ul><li>Marcar, remarcar e desmarcar seus horários e enviar lembretes;</li><li>passar sua conversa para a equipe quando você precisar;</li>
         <li>reconhecer você quando voltar a falar com a gente.</li></ul>
       <p>Não vendemos nem usamos seus dados para propaganda.</p>
-      <h2>Onde ficam</h2>
-      <ul><li>Banco de dados da plataforma (Supabase, servidores no Brasil);</li><li>WhatsApp (Meta), por onde as mensagens passam;</li>
+      <h2>Por que podemos usar</h2>
+      <p>Para agendar e cuidar do seu atendimento, que você mesmo pediu (LGPD, art. 7º, V); para dados ligados à saúde, para a tutela
+        da sua saúde por profissionais de saúde (art. 11, II, "f"); para reconhecer quem retorna, pelo interesse legítimo de ${nome}
+        em atender melhor (art. 7º, IX).</p>
+      <h2>Com quem compartilhamos e onde ficam</h2>
+      <ul><li>Banco de dados da plataforma (Supabase), em servidores no Brasil;</li><li>WhatsApp (Meta), por onde as mensagens passam;</li>
         ${p.usa_google ? "<li>Google Agenda da equipe, com seu nome e telefone nos horários marcados;</li>" : ""}
-        <li>um serviço de inteligência artificial, que lê a conversa só para responder e não guarda os dados para outros fins.</li></ul>
+        <li>um serviço de inteligência artificial, que lê a conversa só para responder e, por contrato, não usa os dados para outros fins
+          nem para treinar modelos.</li></ul>
+      <p>Alguns desses serviços podem tratar dados fora do Brasil (por exemplo, nos EUA). Essas transferências seguem a LGPD (art. 33)
+        e as cláusulas-padrão aprovadas pela ANPD. Você pode pedir mais informações pelo contato abaixo.</p>
       <h2>Por quanto tempo</h2>
-      <p>Guardamos seus dados até você pedir que sejam apagados, ou até ${nome} deixar de usar a plataforma. Depois disso, eles são apagados.</p>
+      <p>Guardamos seus dados enquanto ${nome} usar a plataforma, até você pedir que sejam apagados. Quando ${nome} deixar de usar a
+        plataforma, os dados são apagados em até ${fim} dias. Podemos manter o que a lei obrigar a guardar.</p>
       <p>A conversa pelo WhatsApp não é prontuário: informações clínicas ficam nos registros próprios de ${nome}.</p>
       <h2>Seus direitos</h2>
-      <p>Você pode pedir para ver, corrigir ou apagar seus dados. Se quiser que apaguemos seus dados, o jeito mais fácil é escrever no próprio
-        WhatsApp, por exemplo: <b>"quero que apaguem meus dados"</b>. A equipe confirma e apaga seu cadastro, suas conversas e seus agendamentos.</p>
-      ${contato ? `<p>Também pode falar com o responsável pelos dados de ${nome}: ${contato}.</p>` : ""}
-      <p class="muted">Base: Lei Geral de Proteção de Dados (Lei 13.709/2018).</p>`;
+      <p>Você pode, a qualquer momento: confirmar se tratamos seus dados e ter acesso a eles; corrigir dados errados; pedir a exclusão
+        (salvo o que a lei obrigar a guardar); saber com quem compartilhamos; pedir a portabilidade; e se opor a um uso de que discorde.
+        O jeito mais fácil de pedir que apaguemos seus dados é escrever no próprio WhatsApp, por exemplo: <b>"quero que apaguem meus dados"</b>.
+        Respondemos em até ${prazo} dias.</p>
+      <h2>Fale com a gente</h2>
+      <p>${contato ? `Responsável pelos dados em ${nome}: ${contato}. ` : ""}Se não ficar satisfeito, você pode reclamar à Autoridade Nacional
+        de Proteção de Dados (ANPD), pelo site <a href="https://www.gov.br/anpd" rel="noopener">gov.br/anpd</a>.</p>
+      <p class="muted">Base: Lei Geral de Proteção de Dados (Lei 13.709/2018). Atualizada em 18/11/2026.</p>`;
   }
-
   (async () => {
     if (!/^[0-9a-f-]{36}$/i.test(id)) return naoEncontrada();
     try {
