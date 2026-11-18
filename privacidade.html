@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de privacidade</title>
+<style>
+  :root { --bg: #f5f6f8; --card: #fff; --ink: #1d2433; --muted: #6b7385; --line: #e3e6ec; --brand: #1f6f5c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 680px; margin: 32px auto; padding: 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 22px 24px; }
+  h1 { font-size: 21px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 22px 0 6px; }
+  ul { padding-left: 20px; margin: 6px 0; } .muted { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main><div class="card" id="conteudo"><p class="muted">Carregando…</p></div></main>
+<script>
+(() => {
+  const SUPABASE_URL = "https://vesskijhvnuuntlwdlze.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_7q24B_RNACbGcMmfYDDwWQ_DfrXVjGT";
+  const alvo = document.getElementById("conteudo");
+  const id = new URLSearchParams(window.location.search).get("n") || "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (x) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[x]);
+  const naoEncontrada = () => { alvo.innerHTML = "<h1>Política de privacidade</h1><p>Página não encontrada. Confira o link recebido pelo WhatsApp.</p>"; };
+
+  function mostrar(p) {
+    const nome = esc(p.nome);
+    document.title = `Política de privacidade · ${p.nome}`;
+    const contato = [p.email && `e-mail <b>${esc(p.email)}</b>`, p.telefone && `telefone <b>${esc(p.telefone)}</b>`].filter(Boolean).join(" ou ");
+    alvo.innerHTML = `
+      <h1>Política de privacidade — ${nome}</h1>
+      <p class="muted">Como ${nome} cuida dos seus dados no atendimento pelo WhatsApp${p.endereco ? ` · ${esc(p.endereco)}` : ""}.</p>
+      <h2>Quem cuida dos seus dados</h2>
+      <p><b>${nome}</b> é responsável pelos seus dados (controladora, nos termos da LGPD). O atendimento automático pelo WhatsApp é
+        operado por uma plataforma contratada, que trata os dados só para isso e segundo as instruções de ${nome}.</p>
+      <h2>Quais dados usamos</h2>
+      <ul><li>Nome e telefone do WhatsApp;</li><li>as mensagens que você troca com o atendimento;</li>
+        <li>seus agendamentos (serviço, dia e horário).</li></ul>
+      <p>Não pedimos informações sobre sua saúde por aqui. Se você mencionar algo assim numa mensagem, a conversa é passada para a equipe.</p>
+      <h2>Para que usamos</h2>
+      <ul><li>Marcar, remarcar e desmarcar seus horários e enviar lembretes;</li><li>passar sua conversa para a equipe quando você precisar;</li>
+        <li>reconhecer você quando voltar a falar com a gente.</li></ul>
+      <p>Não vendemos nem usamos seus dados para propaganda.</p>
+      <h2>Onde ficam</h2>
+      <ul><li>Banco de dados da plataforma (Supabase, servidores no Brasil);</li><li>WhatsApp (Meta), por onde as mensagens passam;</li>
+        ${p.usa_google ? "<li>Google Agenda da equipe, com seu nome e telefone nos horários marcados;</li>" : ""}
+        <li>um serviço de inteligência artificial, que lê a conversa só para responder e não guarda os dados para outros fins.</li></ul>
+      <h2>Por quanto tempo</h2>
+      <p>Guardamos seus dados até você pedir que sejam apagados, ou até ${nome} deixar de usar a plataforma. Depois disso, eles são apagados.</p>
+      <p>A conversa pelo WhatsApp não é prontuário: informações clínicas ficam nos registros próprios de ${nome}.</p>
+      <h2>Seus direitos</h2>
+      <p>Você pode pedir para ver, corrigir ou apagar seus dados. Se quiser que apaguemos seus dados, o jeito mais fácil é escrever no próprio
+        WhatsApp, por exemplo: <b>"quero que apaguem meus dados"</b>. A equipe confirma e apaga seu cadastro, suas conversas e seus agendamentos.</p>
+      ${contato ? `<p>Também pode falar com o responsável pelos dados de ${nome}: ${contato}.</p>` : ""}
+      <p class="muted">Base: Lei Geral de Proteção de Dados (Lei 13.709/2018).</p>`;
+  }
+
+  (async () => {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return naoEncontrada();
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/politica_privacidade`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${SUPABASE_KEY}`, "content-type": "application/json" },
+        body: JSON.stringify({ p_business_id: id }),
+      });
+      const p = await r.json().catch(() => null);
+      if (!r.ok || !p || !p.nome) return naoEncontrada();
+      mostrar(p);
+    } catch { naoEncontrada(); }
+  })();
+})();
+</script>
+</body>
+</html>

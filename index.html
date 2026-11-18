@@ -43,6 +43,7 @@
   button.btn:hover { border-color: #c9ced8; }
   button.prim { background: var(--brand); border-color: var(--brand); color: #fff; }
   button.perigo { color: var(--bad); }
+  .aviso-box { border: 1px solid #f1c9c4; background: #fdf3f2; border-radius: 8px; padding: 10px 12px; }
   button.mini { padding: 4px 8px; font-size: 12px; }
   button:disabled { opacity: .5; cursor: default; }
   label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
@@ -189,7 +190,7 @@ const PROVEDORES = {
   openai: { nome: "OpenAI", modelos: ["gpt-5-mini", "gpt-5"], site: "https://platform.openai.com/api-keys" },
 };
 const ABAS_NEG = [["visao", "Visão geral"], ["config", "Configuração inicial"], ["conversas", "Conversas"], ["assinatura", "Assinatura"], ["geral", "Negócio"], ["agenda", "Agenda"], ["ia", "IA"], ["whatsapp", "WhatsApp"],
-  ["avisos", "Avisos"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
+  ["avisos", "Avisos"], ["privacidade", "Privacidade"], ["cobranca", "Cobrança"], ["erros", "Erros"]];
 
 let segmentos = [];
 let negocios = [], verticais = [], plataforma = null, atual = null, abaNeg = "visao", timerQA = null, filtroErros = "aberto";
@@ -371,7 +372,7 @@ async function recarregar() { await carregarClientes(); await abrirNegocio(atual
 function desenharAba() {
   const alvo = $("#conteudo-neg");
   clearInterval(timerConversas); timerConversas = null;
-  const fn = { visao: abaVisao, config: abaConfig, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
+  const fn = { visao: abaVisao, config: abaConfig, conversas: abaConversas, assinatura: abaAssinatura, geral: abaGeral, agenda: abaAgenda, ia: abaIA, whatsapp: abaWhatsApp, avisos: abaAvisos, privacidade: abaPrivacidade, cobranca: abaCobranca, erros: abaErrosNegocio }[abaNeg];
   alvo.innerHTML = ""; fn(alvo);
 }
 
@@ -1098,6 +1099,79 @@ function abaWhatsApp(alvo) {
 }
 
 // --- Avisos -----------------------------------------------------------
+// LGPD: aviso de privacidade (dados que ele usa), pedidos de exclusão e exclusão de paciente.
+function idadeDias(iso) {
+  const n = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
+  return n <= 0 ? "hoje" : n === 1 ? "há 1 dia" : `há ${n} dias`;
+}
+async function abaPrivacidade(alvo) {
+  const n = atual.negocio, c = n.config ?? {}, pv = c.privacidade ?? {};
+  alvo.innerHTML = `
+    <p class="muted peq">Na primeira resposta a cada paciente, o bot manda um aviso curto com o link da política de privacidade deste negócio.
+      Os dados do paciente só são apagados quando ele (ou o negócio) pede — nada é apagado sozinho.</p>
+    <h4>Dados usados no aviso e na política</h4>
+    <div class="grid2"><div><label>E-mail do responsável pelos dados</label><input id="p-email" value="${esc(pv.email ?? "")}" placeholder="contato@clinica.com"></div>
+      <div><label>Telefone do responsável (com DDD)</label><input id="p-tel" value="${esc(pv.telefone ?? "")}" placeholder="(21) 99999-0000"></div></div>
+    <p class="muted peq">Preencha pelo menos um. O nome do negócio vem da aba <b>Negócio</b> (sem "TODO").</p>
+    <label class="linha" style="color:var(--ink);font-weight:400"><input type="checkbox" id="p-aviso" ${c.aviso_privacidade === false ? "" : "checked"}> Enviar o aviso de privacidade ao paciente</label>
+    <div class="linha" style="margin-top:8px"><button class="btn prim" id="p-salvar">Salvar</button>
+      <a class="btn" id="p-link" target="_blank" rel="noopener">Abrir a política</a></div>
+    <h4>Prévia do aviso (exatamente o que o paciente recebe)</h4>
+    <div id="p-previa" class="peq"><span class="muted">Carregando…</span></div>
+    <h4>Pedidos de exclusão</h4>
+    <div id="p-pedidos" class="peq"><span class="muted">Carregando…</span></div>
+    <h4>Excluir dados de um paciente</h4>
+    <p class="muted peq">Para pedidos que chegaram por outro canal (telefone, e-mail, balcão). Apaga cadastro, conversas, agendamentos e os eventos no Google Agenda.</p>
+    <div class="linha"><input id="p-busca" placeholder="Telefone do paciente" style="max-width:240px"><button class="btn" id="p-buscar">Buscar</button></div>
+    <div id="p-resultado" style="margin-top:8px"></div>
+    <div id="p-confirma" style="margin-top:8px"></div>`;
+  $("#p-salvar").onclick = () => salvarNegocio({ config: { privacidade: { email: $("#p-email").value.trim() || null, telefone: $("#p-tel").value.trim() || null },
+    aviso_privacidade: $("#p-aviso").checked } }, "Privacidade salva");
+
+  const confirmar = (cu) => {
+    $("#p-confirma").innerHTML = `<div class="aviso-box"><b>Excluir todos os dados de ${esc(cu.nome || "paciente sem nome")}?</b>
+      Isso não pode ser desfeito. Para confirmar, digite o telefone do paciente: <span class="mono">${esc(cu.telefone)}</span>
+      <div class="linha" style="margin-top:6px"><input id="p-conf" placeholder="Telefone" style="max-width:220px">
+      <button class="btn perigo" id="p-conf-ok">Excluir definitivamente</button><button class="btn" id="p-conf-nao">Cancelar</button></div>
+      <div id="p-conf-res"></div></div>`;
+    $("#p-conf-nao").onclick = () => { $("#p-confirma").innerHTML = ""; };
+    $("#p-conf-ok").onclick = async () => {
+      const r = $("#p-conf-res"); r.innerHTML = '<span class="muted">Excluindo…</span>';
+      try {
+        const j = await acaoServidor("excluir_paciente", n.id, { customer_id: cu.customer_id, confirmacao: $("#p-conf").value.trim() });
+        if (!j.ok) return r.innerHTML = `<div class="erro-msg">${esc(j.erro)}</div>`;
+        toast(`Dados excluídos (${j.conversas} conversa(s), ${j.reservas} reserva(s))`); recarregar();
+      } catch (e) { erroEm(r, e); }
+    };
+  };
+
+  try {
+    const pr = await rpc("admin_privacidade", { p_business_id: n.id });
+    $("#p-link").setAttribute("href", pr.link);
+    $("#p-previa").innerHTML = pr.previa?.ok
+      ? `<div class="bolha">${esc(pr.previa.texto)}</div>`
+      : `<div class="erro-msg">Falta preencher: ${esc((pr.previa?.faltando ?? []).map((x) => x === "nome" ? "nome do negócio (sem TODO)" : "contato do responsável").join(" e "))}.
+         Enquanto faltar, o aviso não é enviado e o envio real pelo WhatsApp não pode ser ligado.</div>`;
+    const ps = pr.pedidos ?? [];
+    $("#p-pedidos").innerHTML = ps.length ? `<table><tr><th>Paciente</th><th>Telefone</th><th>Pedido</th><th></th></tr>${ps.map((x, i) =>
+      `<tr><td>${esc(x.nome ?? "—")}</td><td class="mono">${esc(x.telefone ?? "—")}</td><td>${idadeDias(x.criado_em)}</td>
+       <td>${x.customer_id ? `<button class="btn mini perigo" data-pedido="${i}">Excluir dados</button>` : ""}</td></tr>`).join("")}</table>`
+      : '<span class="muted">Nenhum pedido aberto.</span>';
+    $$("[data-pedido]", alvo).forEach((b) => b.onclick = () => confirmar(ps[Number(b.dataset.pedido)]));
+  } catch (e) { erroEm($("#p-previa"), e); }
+
+  $("#p-buscar").onclick = async () => {
+    const r = $("#p-resultado"); $("#p-confirma").innerHTML = "";
+    try {
+      const cu = await rpc("admin_buscar_paciente", { p_business_id: n.id, p_telefone: $("#p-busca").value.trim() });
+      if (!cu) return r.innerHTML = '<span class="muted">Nenhum paciente com esse telefone neste negócio.</span>';
+      r.innerHTML = `<div class="linha"><span><b>${esc(cu.nome ?? "Sem nome")}</b> · <span class="mono">${esc(cu.telefone)}</span> ·
+        ${cu.conversas} conversa(s) · ${cu.reservas} reserva(s)</span> <button class="btn mini perigo" data-excluir>Excluir dados</button></div>`;
+      $("[data-excluir]", r).onclick = () => confirmar(cu);
+    } catch (e) { erroEm(r, e); }
+  };
+}
+
 function abaAvisos(alvo) {
   const c = atual.negocio.config;
   alvo.innerHTML = `
